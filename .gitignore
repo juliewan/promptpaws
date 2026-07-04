@@ -1,0 +1,21 @@
+# macOS / IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Node (planned TypeScript port)
+node_modules/
+
+# Local tooling
+.claude/settings.local.json
+uv.lock
