@@ -27,6 +27,17 @@ BLOCK_THRESHOLD = 0.8
 
 _ENCODING_SIGNAL_WEIGHT = 0.3  # weight of the bare "an encoding was decoded" observation
 
+# A single technique is often just a flag; stacking independent ones is what the
+# persona-jailbreak literature shows actually drives success (persona + fictional
+# framing, persona + response-prefix injection, override + fiction). When two or
+# more distinct *intent* classes co-occur, add a synergy bump so a stack of
+# individually flag-level signals escalates to a block.
+_SYNERGY_BONUS = 0.2
+# Classes that are observations, not intent, and so don't count toward a stack:
+# "encoding" is a bare "something was decoded" note (already handled by the
+# decoded boost), not an attack technique on its own.
+_OBSERVATION_CLASSES = frozenset({"encoding"})
+
 
 def inspect(text: str, judge: SemanticJudge | None = None) -> Verdict:
     """Inspect one user message and return the firewall's verdict.
@@ -72,6 +83,11 @@ def inspect(text: str, judge: SemanticJudge | None = None) -> Verdict:
     signals.extend(detect_structural(normalized, "normalized"))
 
     risk, hard_block = combine_signals(signals, boost_decoded=True)
+
+    intent_classes = {s.attack_class for s in signals if s.attack_class not in _OBSERVATION_CLASSES}
+    if len(intent_classes) >= 2:
+        risk = min(1.0, risk + _SYNERGY_BONUS)
+
     decision = _decide(risk, hard_block)
     if hard_block:
         risk = max(risk, BLOCK_THRESHOLD)

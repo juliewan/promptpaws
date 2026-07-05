@@ -1,6 +1,6 @@
 # Planning: Chat Interface Hardening
 
-Name: **promptpaws** (formerly working name "chat-armor").
+Name: **promptpaws**
 
 ## What this is
 

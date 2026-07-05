@@ -24,9 +24,14 @@ MAX_DECODE_DEPTH = 3
 # ordinary words from being treated as encoded blobs.
 BASE64_RE = re.compile(r"[A-Za-z0-9+/]{16,}={0,2}")
 HEX_RE = re.compile(r"(?:[0-9a-fA-F]{2}){8,}")
+# Percent-escapes. Like the base64/hex length floors, we require a *run* of them
+# before treating text as a URL-encoded payload — otherwise a prompt that merely
+# mentions percent-encoding ('"!"="%21"', a pasted link) reads as an attack.
+URL_ESCAPE_RE = re.compile(r"%[0-9A-Fa-f]{2}")
 
 _MIN_DECODED_LEN = 6
 _PRINTABLE_RATIO = 0.85
+_MIN_URL_ESCAPES = 4
 
 
 @dataclass(frozen=True)
@@ -92,7 +97,7 @@ def decode_representations(text: str, _depth: int = 0) -> list[Decoded]:
             results.append(Decoded("hex", decoded, True))
             results.extend(decode_representations(decoded, _depth + 1))
 
-    if "%" in text:
+    if len(URL_ESCAPE_RE.findall(text)) >= _MIN_URL_ESCAPES:
         unquoted = unquote(text)
         if unquoted != text and _printable(unquoted):
             results.append(Decoded("url", unquoted, True))
