@@ -118,17 +118,26 @@ def screen_output(
 
 @mcp.tool()
 def session_risk(
-    session_id: str, input_risk: float = 0.0, output_risk: float = 0.0
+    session_id: str,
+    input_risk: float = 0.0,
+    output_risk: float = 0.0,
+    text: str | None = None,
 ) -> dict:
     """Fold this turn's risk into the conversation's cumulative score.
 
     Pass the risk_score from check_input as input_risk and from screen_output as
-    output_risk. Returns the recommended action for this turn: allow, heighten
+    output_risk. Pass the (normalized) user message as `text` to enable
+    near-duplicate-rewrite detection — the fingerprint of an optimization/search
+    attack that mutates one prompt many times; omit it and only the risk
+    arithmetic runs. Returns the recommended action for this turn: allow, heighten
     (stricter screening), refuse, or reset (drop accumulated context). The score
     decays slowly but never resets on a benign turn — earlier compliance never
-    authorizes later escalation.
+    authorizes later escalation. On a `reset` action, call session_reset to drop
+    the accumulated context before the next turn.
     """
-    assessment = _monitor.session(_tracker.record_risk(session_id, input_risk, output_risk))
+    assessment = _monitor.session(
+        _tracker.record_risk(session_id, input_risk, output_risk, text=text)
+    )
     return {
         "session_id": assessment.session_id,
         "turn": assessment.turn,
@@ -137,6 +146,19 @@ def session_risk(
         "action": assessment.action.value,
         "signals": [asdict(s) for s in assessment.signals],
     }
+
+
+@mcp.tool()
+def session_reset(session_id: str) -> dict:
+    """Drop a conversation's accumulated cross-turn risk.
+
+    This is the effect of the `reset` action from session_risk: once a session
+    crosses the reset threshold, clear its state so the conversation starts fresh
+    instead of every later turn recommending reset forever. Safe to call for an
+    unknown session id (a no-op).
+    """
+    _tracker.reset(session_id)
+    return {"session_id": session_id, "reset": True}
 
 
 def main() -> None:

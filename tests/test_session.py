@@ -164,3 +164,45 @@ def test_near_duplicate_inert_without_text():
         a = t.record_risk("s", input_risk=0.0)
     assert not _near_dup(a)
     assert a.action is SessionAction.ALLOW
+
+
+# --- bounded memory (long-lived server must not leak) ---
+
+
+def test_turn_count_survives_retained_window():
+    # A long conversation reports its true turn number even though only a short
+    # window of per-turn risks is retained.
+    t = SessionTracker()
+    a = None
+    for _ in range(50):
+        a = t.record_risk("s", input_risk=0.0)
+    assert a.turn == 50
+    assert len(t.state("s").recent_turn_risks) <= 3
+
+
+def test_max_turn_risk_is_a_running_max_across_the_whole_session():
+    # An early spike still counts against the crescendo "no single turn flagged"
+    # rule after it has fallen out of the retained window.
+    t = SessionTracker()
+    t.record_risk("s", input_risk=0.5)  # spike on turn 1
+    for _ in range(10):
+        t.record_risk("s", input_risk=0.0)
+    assert t.state("s").max_turn_risk == 0.5
+
+
+def test_session_count_is_bounded_by_lru_eviction():
+    t = SessionTracker(max_sessions=3)
+    for i in range(5):
+        t.record_risk(f"s{i}", input_risk=0.1)
+    assert len(t._states) == 3
+    # The three most-recently-seen survive; the oldest two were evicted.
+    assert set(t._states) == {"s2", "s3", "s4"}
+
+
+def test_touching_a_session_keeps_it_from_eviction():
+    t = SessionTracker(max_sessions=2)
+    t.record_risk("a", input_risk=0.1)
+    t.record_risk("b", input_risk=0.1)
+    t.record_risk("a", input_risk=0.1)  # touch "a" so "b" is now the LRU
+    t.record_risk("c", input_risk=0.1)  # evicts "b", not "a"
+    assert set(t._states) == {"a", "c"}

@@ -36,6 +36,7 @@ layered on via the firewall's ``SemanticJudge`` upstream.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from enum import Enum
@@ -58,6 +59,12 @@ _NEAR_DUP_MIN_HITS = 2  # one rephrase is normal; a cluster is a search
 _NEAR_DUP_STEP = 0.15  # per near-duplicate neighbor
 _NEAR_DUP_CAP = 0.5  # a pure-duplicate barrage reaches heighten/refuse, never a lone block
 
+_RISING_WINDOW = 3  # turns retained for the rising-trend check (all the crescendo rule reads)
+# Cap on distinct live conversations. The tracker keeps in-process state, so an
+# unbounded map is a slow leak in a long-lived server; evict the least-recently-used
+# once the cap is crossed. Ten thousand is generous for a single process.
+_MAX_SESSIONS = 10_000
+
 
 class SessionAction(str, Enum):
     ALLOW = "allow"
@@ -70,12 +77,17 @@ class SessionAction(str, Enum):
 class SessionState:
     session_id: str
     cumulative_risk: float = 0.0
-    turn_risks: list[float] = field(default_factory=list)
+    turn_count: int = 0
+    # Running max of every turn's risk. Kept as a scalar rather than the full
+    # history so the "no single turn tripped the flag" crescendo check stays exact
+    # while memory stays bounded.
+    max_turn_risk: float = 0.0
+    recent_turn_risks: list[float] = field(default_factory=list)  # last few, for the rising-trend check
     recent_prompts: list[str] = field(default_factory=list)  # rolling window for near-dup search
 
     @property
     def turns(self) -> int:
-        return len(self.turn_risks)
+        return self.turn_count
 
 
 @dataclass
@@ -96,11 +108,20 @@ def _combine(a: float, b: float) -> float:
 class SessionTracker:
     """In-process cumulative-risk tracker, keyed by conversation id."""
 
-    def __init__(self) -> None:
-        self._states: dict[str, SessionState] = {}
+    def __init__(self, max_sessions: int = _MAX_SESSIONS) -> None:
+        self._states: OrderedDict[str, SessionState] = OrderedDict()
+        self._max_sessions = max_sessions
 
     def state(self, session_id: str) -> SessionState:
-        return self._states.setdefault(session_id, SessionState(session_id))
+        st = self._states.get(session_id)
+        if st is None:
+            st = SessionState(session_id)
+            self._states[session_id] = st
+            while len(self._states) > self._max_sessions:
+                self._states.popitem(last=False)  # evict the least-recently-used session
+        else:
+            self._states.move_to_end(session_id)  # touch: mark most-recently-used
+        return st
 
     def record_risk(
         self,
@@ -140,7 +161,10 @@ class SessionTracker:
         cumulative = _combine(decayed, turn_risk)
 
         state.cumulative_risk = cumulative
-        state.turn_risks.append(turn_risk)
+        state.turn_count += 1
+        state.max_turn_risk = max(state.max_turn_risk, turn_risk)
+        state.recent_turn_risks.append(turn_risk)
+        del state.recent_turn_risks[:-_RISING_WINDOW]
 
         crescendo = self._is_crescendo(state)
         if crescendo:
@@ -183,17 +207,20 @@ class SessionTracker:
         self._states.pop(session_id, None)
 
     def _is_crescendo(self, state: SessionState) -> bool:
-        risks = state.turn_risks
-        if len(risks) < _CRESCENDO_MIN_TURNS:
+        if state.turn_count < _CRESCENDO_MIN_TURNS:
             return False
         # Death by a thousand cuts: no single turn tripped the flag, yet the
-        # accumulated score is elevated.
+        # accumulated score is elevated. max_turn_risk is a running max, so this
+        # stays exact even though only a short window of turns is retained.
         slow_climb = (
-            state.cumulative_risk >= HEIGHTEN_THRESHOLD and max(risks) < _CRESCENDO_STEP_CAP
+            state.cumulative_risk >= HEIGHTEN_THRESHOLD
+            and state.max_turn_risk < _CRESCENDO_STEP_CAP
         )
         # Or a strictly rising trend over the last three turns.
-        last = risks[-3:]
-        rising = last[0] < last[1] < last[2] and last[2] > _CRESCENDO_RISE_FLOOR
+        last = state.recent_turn_risks[-3:]
+        rising = (
+            len(last) == 3 and last[0] < last[1] < last[2] and last[2] > _CRESCENDO_RISE_FLOOR
+        )
         return slow_climb or rising
 
     def _near_duplicate(self, state: SessionState, text: str | None) -> tuple[float, int]:

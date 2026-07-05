@@ -2,6 +2,12 @@
 
 Name: **promptpaws**
 
+> **Status (2026-07-05).** Phases 0–4 are shipped and green: 162 tests passing plus
+> 20 tracked known-gap xfails; red-team harness at 32/32 attacks caught across 9
+> classes with 0/24 benign blocked; ruff clean. Phase 5 (first real deployment) has
+> not started. See "Where things stand", "Next steps", and "Polish / refactor list"
+> at the bottom — the sections above them are the durable design and still hold.
+
 ## What this is
 
 A defense-in-depth guardrail layer that sits around an LLM chat interface. It inspects
@@ -175,45 +181,134 @@ expensive high-confidence checks.
 ## Reference implementation targets
 
 - **Core logic**: language-agnostic, described as clear steps so it can be ported.
-- **Python**: primary reference (fits the detection tooling world, easy to unit test).
-- **TypeScript / Node**: web reference so it drops into a site backend directly.
+- **Python**: primary reference — **done**, shipped as a zero-dependency library plus an
+  optional MCP server (`promptpaws-mcp`).
+- **TypeScript / Node**: web reference so it drops into a site backend directly — **not
+  started**; deliberately deferred until the semantic layer settles the Python API (adding
+  `SemanticJudge` backends will reshape `guard()`/`inspect()` signatures, and porting twice
+  is waste).
 
 Keep the two in sync behavior-wise; the taxonomy and detector specs are the source of truth,
 the language ports are just implementations.
 
-## Build phases
+## Where things stand
 
-**Phase 0: taxonomy and specs.** The skills. Detection signals and mitigations per attack
-class, plus the layered architecture. This is the durable asset; code is downstream of it.
+Build phases 0–4 from the original plan are complete:
 
-**Phase 1: input firewall MVP.** Normalization, decode-and-rescan, rule-based scanners,
-structural detectors. Ship with a test corpus of known attacks per class.
+- **Phase 0 — taxonomy and specs**: three skills (`input-firewall`, `prompt-hardening`,
+  `output-screening`) with the attack taxonomy and detector specs in `references/`.
+- **Phase 1 — input firewall**: NFKC normalization, decode-and-rescan (depth-capped),
+  word-break collapse, rule scanners, structural detectors (many-shot, MetaBreak,
+  policy puppetry), statistical anomaly detectors (adversarial suffix, mixed-script and
+  ASCII-art obfuscation), scored across representations with a stacking synergy bump.
+- **Phase 2 — prompt hardening + output screening**: instruction hierarchy, per-request
+  spotlight markers, canary tripwires; leakage/verbatim-span/dual-response screening.
+- **Phase 3 — session tracking**: cumulative decayed risk, crescendo detection,
+  near-duplicate-rewrite detection, graduated allow/heighten/refuse/reset actions.
+- **Phase 4 — monitoring + red-team harness**: pluggable sinks (JSONL default),
+  `scan_alerts`, `promptpaws-redteam` reporting catch/FP rates with a non-zero exit on
+  any bypass or benign block.
 
-**Phase 2: prompt hardening + output screening.** Instruction hierarchy template,
-spotlighting wrapper, output leakage + policy scan.
+Shipped beyond the original plan:
 
-**Phase 3: session tracking.** Cumulative risk, crescendo detection.
+- **`guard()` facade** — firewall + hardening in one call, the recommended integration.
+- **MCP server** — stdio/HTTP transports, four tools, env-var logging.
+- **Known-gaps machinery** — `corpus/known_gaps/` runs as xfail so misses are recorded,
+  never counted as passes; an XPASS is the promotion signal into `corpus/attacks/`.
+- **External dataset evaluation** — JBB-Behaviors benign split: 0% false blocks;
+  JailbreakV-28K text templates: 78% caught (the remaining ~8 named-persona families are
+  tracked known gaps). Testing earned one new production rule (rule-negation cue).
 
-**Phase 4: monitoring + red-team harness.** Logging, alerting, and an automated suite that
-throws the full taxonomy at the stack and reports what got through. Wire bypasses back into
-the corpus.
+What exists only as a hook: `SemanticJudge` (firewall) and `PolicyJudge` (screening) are
+Protocols with no implementation behind them. Everything currently caught is caught by
+rules, structure, or statistics.
 
-**Phase 5: your site.** Deploy behind your own chat as the first real-traffic test.
+## Next steps (priority order)
+
+1. **Semantic layer v1 — the highest-value item in the repo.** Implement the first
+   `SemanticJudge` backend: embedding similarity against the attack corpus + known-gap
+   templates, shipped as an optional extra (`pip install promptpaws[semantic]`) using a
+   small local embedding model so the core stays zero-dependency and provider-free. The
+   20 xfail cases are the ready-made acceptance test: success is xfails flipping to
+   XPASS and being promoted into `corpus/attacks/`. This is also the unlock for the
+   README's known limitation — crescendo detection needs a semantic layer to feed
+   per-turn risk for keyword-clean escalation. A first `PolicyJudge` backend can follow
+   the same pattern.
+2. ~~**CI.**~~ **Done** — `.github/workflows/ci.yml` runs ruff + pytest +
+   `promptpaws-redteam` on 3.10 and 3.12, so the red-team harness now genuinely gates
+   as the README claims.
+3. **Phase 5 — deploy behind the site chat.** The README's Vercel path is written but
+   unexercised; deploying it is what starts the monitoring flywheel (real bypasses →
+   corpus → new signals), which the whole design says is the layer that matters most.
+   Prerequisites that fall out of this: define the site's actual content policy (the
+   `policy=` string), and decide tools/no-tools (still pure conversation as planned).
+4. **Corpus depth.** Two in-scope taxonomy classes have no corpus file at all:
+   summarization/indirect injection and fill-in-the-gap/completion (they're covered by
+   hardening/screening design, but nothing regression-tests them end to end). The benign
+   corpus is 24 cases — thin for the metric the plan itself calls the one people forget;
+   grow it toward 100+ benign-but-weird messages (translation requests, markup
+   discussions, fiction asks, "ignore my typo" phrasing) before tightening any weights.
+5. **TypeScript port** — stays deferred behind 1–3 (see above).
+
+## Polish / refactor list
+
+Concrete trouble spots found in review, roughly ordered by real-world impact.
+**Resolved** (commit `ci-and-session-hardening`):
+
+- ~~**`SessionTracker` grows without bound**~~ — LRU eviction caps live sessions
+  (`_MAX_SESSIONS`), `turn_risks` is replaced by a running `max_turn_risk` plus a
+  3-turn window, so per-session memory is bounded and crescendo detection is unchanged.
+- ~~**MCP sessions can't be reset**~~ — added a `session_reset` tool.
+- ~~**Near-duplicate detection is unreachable over MCP**~~ — `session_risk` now takes an
+  optional `text` param threaded into `record_risk`.
+- ~~**`.gitignore` missing `venv/`**~~ — added.
+
+**Still open:**
+
+- **`guard()` has no `judge` passthrough** (`guard.py`): `inspect()` accepts a
+  `SemanticJudge` but the recommended facade can't supply one (nor a `Monitor`). Plumb
+  both through *before* semantic v1 lands, or the flagship feature won't be usable from
+  the flagship entry point.
+- **Structural detection only sees the normalized text** (`pipeline.py`):
+  `detect_structural` is not run on decoded representations, so a base64-wrapped
+  MetaBreak token or fake-turn transcript decodes cleanly but never gets structurally
+  scanned. Run it per-representation like the other scanners (the dedup already
+  prevents double-counting).
+- **Red-team `clean` ignores benign flags** (`redteam.py`): only blocks fail the gate,
+  so flag creep on benign traffic is invisible until it becomes block creep. Add a
+  flag-rate budget (e.g. fail above 5%) now that the flagged list is already collected.
+- **Duplicate refusal constants**: `guard.DEFAULT_REFUSAL` and `screening.SAFE_REFUSAL`
+  are the same string defined twice; give it one home.
+- **`scan_alerts` recomputes entropy twice per record** (`monitoring.py`): compute once,
+  reuse in the message. Trivial.
 
 ## Success metrics
 
+Targets from the original plan, with current measurements:
+
 - **Catch rate** per attack class against the red-team corpus (target: near-total on the
-  automatable classes).
+  automatable classes). *Now: 100% on the 32-case literal corpus across 9 classes; 78%
+  on JailbreakV-28K text templates; 20 known-gap paraphrase/persona cases tracked as
+  xfail rather than counted.*
 - **False positive rate** on a corpus of benign-but-weird real messages. This is the one
-  people forget. A filter that blocks legitimate users is a failure even at 100% catch rate.
+  people forget. A filter that blocks legitimate users is a failure even at 100% catch
+  rate. *Now: 0% blocks and 0% flags on 24 benign cases — but the corpus is too small to
+  trust; growing it is next-steps item 4.*
 - **Bypass cost**: qualitative, how many iterations a human tester needs to get through.
-- **Time to new signal**: how fast a novel bypass becomes a covered case.
+  *Not yet measured; becomes measurable once Phase 5 traffic exists.*
+- **Time to new signal**: how fast a novel bypass becomes a covered case. *The loop
+  works — the JailbreakV rule-negation cue went eval-miss → detector → promoted catch —
+  but it isn't yet timed against real traffic.*
 
-## Open questions for you
+## Open questions
 
-- Does your site's chat have any tools or data access, or is it pure conversation? Tools
-  change the threat model a lot (indirect injection, tool abuse).
-- What is the actual policy for your domain? "Disallowed content" has to be defined before
-  output screening can check it.
-- Do you want the standalone repo to be opinionated (batteries-included defaults) or a
-  toolkit (compose your own)? Affects how the skills are written.
+Two of the original three are resolved:
+
+- ~~Opinionated or toolkit?~~ **Both, and it works**: layers stay public (`inspect`,
+  `harden`, `screen_output`), `guard()` is the batteries-included path, MCP wraps it all.
+- ~~What is the policy for your domain?~~ **Structurally answered** — `policy=` and the
+  pluggable `PolicyJudge` keep the core policy-free — but the *actual* site policy text
+  still needs writing as part of Phase 5.
+- **Still open:** does the site chat get tools or data access, or stay pure
+  conversation? Tools change the threat model a lot (indirect injection, tool abuse);
+  everything so far assumes pure conversation.
