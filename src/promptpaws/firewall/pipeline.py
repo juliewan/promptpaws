@@ -14,6 +14,7 @@ flag over block for a lone noisy signal to protect the false positive rate.
 
 from __future__ import annotations
 
+from promptpaws.firewall.anomaly import detect_adversarial_noise, detect_obfuscation
 from promptpaws.firewall.collapse import collapse_word_breaks
 from promptpaws.firewall.decode import decode_representations
 from promptpaws.firewall.normalize import normalize
@@ -64,6 +65,8 @@ def inspect(text: str, judge: SemanticJudge | None = None) -> Verdict:
     for name, value in representations:
         signals.extend(scan_rules(value, name))
         signals.extend(scan_semantic(value, name, judge))
+        signals.extend(detect_adversarial_noise(value, name))
+        signals.extend(detect_obfuscation(value, name))
 
     # Structural shape is best judged on the normalized text.
     signals.extend(detect_structural(normalized, "normalized"))

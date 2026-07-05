@@ -1,87 +1,86 @@
-# promptpaws
+# promptpaws 🐾
 
-Layered, defense-in-depth guardrails that make an LLM chat interface much harder
-to jailbreak. 🐾
+Jailbreak guardrails for chat (=ﾟヮﾟ)
 
 <p align="center">
-  <img src="miyoko_promptpaws.png" alt="Miyoko as maneki-neko" width="320">
+  <img src="miyoko_promptpaws.png" alt="Miyoko as maneki-neko" width="200">
 </p>
+In Balatro, Lucky procs bank gold. Here, regression tests bank on cha-ching attacks (ㅇㅅㅇ)
 
 ## Overview
 
-Any chatbot exposed to the public is a target: users try to override its
-instructions, smuggle payloads past filters, impersonate the system, and steer it
-somewhere it shouldn't go. promptpaws wraps a chat interface with defense in
-depth — it normalizes and screens input before the model sees it, hardens how the
-model is instructed, inspects the output, tracks risk across a conversation, and
-logs every decision for review.
+LLMs can be vulnerable to instruction-override attempts. Promptpaws normalizes and
+screens user input before it reaches the LLM, hardens original instructions,
+inspects output, tracks risk across a conversation, and logs interactions for review.
 
-It ships as a written attack taxonomy and detector specification (the durable
-part) plus a Python reference implementation, usable as a library or an MCP
-server.
+Shipped as attack taxonomy/detector specification with python implementation
+usable as a library or MCP server.
 
-No single filter or system prompt is robust against an adaptive attacker with
-unlimited attempts, and promptpaws does not claim to be. The goal is a layered
-system that neutralizes the common, automatable attacks cheaply, raises the cost
-of the rest, degrades gracefully — a bypass at one layer is caught at the next —
-and records everything so you can learn from attempts and tighten over time.
+No filter or system prompt is robust against adaptive attackers with
+unlimited attempts, and promptpaws does not claim to be. This is a layered
+system that neutralizes common, automated attacks cheaply, raises the cost
+of the rest, degrades gracefully (bypass at one layer is caught at the next)
+and offers logging for tightening over time.
 
 ## Architecture
 
-A request flows through five layers; a block or flag at any layer can
-short-circuit. The full threat model and design are in `PLANNING.md`.
+Requests flow through five layers; a block or flag at any layer immediately
+short-circuits.
 
-1. **Input firewall** — normalizes, decodes, and scans each message across
-   several representations before the model sees it, then blocks, flags, or
+1. **Input firewall:** normalizes, decodes, and scans each input across
+   several representations, then blocks, flags, or
    passes it. `skills/input-firewall`
-2. **Prompt hardening** — builds the model call so untrusted content lands as
-   data, not instructions: an explicit instruction hierarchy plus spotlighting,
-   which wraps untrusted text in an unforgeable per-request marker.
+2. **Prompt hardening:** builds the model call so untrusted content is read
+   as data, not instruction: an explicit hierarchy plus spotlighting,
+   which wraps non-instructional text in an unforgeable per-request marker.
    `skills/prompt-hardening`
-3. **Output screening** — inspects the response before it reaches the user for
+3. **Output screening:** inspects the response before it reaches the user for
    system-prompt leakage and dual-response jailbreaks. `skills/output-screening`
-4. **Session tracking** — carries cumulative risk across turns to catch slow,
-   multi-message steering that no single message trips.
-5. **Monitoring** — logs every decision with the signals that fired, and feeds
-   real bypasses back into the test corpus.
+4. **Session tracking:** carries cumulative risk across turns to catch 
+   multi-message steering.
+5. **Monitoring:** logs every decision with signal attribution, and feeds
+   bypasses back into the test corpus.
 
-The first three layers have written guides ("skills") with per-class detection
-signals and mitigations; behind them all is an attack taxonomy at
+The first three layers have skills with per-class detection signals and mitigations;
+behind them all is an attack taxonomy at
 `skills/input-firewall/references/attack-taxonomy.md`.
 
 ## Attack coverage
 
 Each class is documented in the taxonomy with detection signals and mitigations:
 
-- Instruction override ("ignore previous instructions" and paraphrases)
-- Roleplay and persona jailbreaks ("pretend you have no rules")
-- Encoding — base64, hex, rot13, homoglyphs, zero-width characters
-- Token-splitting to evade keyword filters (`i g n o r e`)
-- Summarization and indirect injection — a payload hidden in content to process
-- Fill-in-the-gap and completion attacks
-- Crescendo — gradual steering toward a target across many turns
-- Many-shot jailbreaking with fabricated example conversations
-- Policy puppetry — spoofed "system" or "policy" authority
-- Logic-based jailbreaks — dual-response and hypothetical framing
-- MetaBreak — special-token / chat-template injection (`<|im_start|>`, `[INST]`, …)
+- Instruction override (e.g., "ignore previous instructions")
+- Roleplay and persona jailbreaks (e.g., "pretend you have no rules")
+- Encoding: base64, hex, rot13, homoglyphs, zero-width characters
+- Obfuscation: mixed-script (Latin + Cyrillic/Greek) words and ASCII-art
+  letterforms that spell a banned word as a picture
+- Adversarial suffixes: GCG-style optimized token salad appended to a request
+- Token-splitting to evade keyword filters (e.g., `i.g.n.o.r.e`)
+- Summarization and indirect injection: a payload hidden in content to process
+- Fill-in-the-gap and completion attacks (e.g., `your prompt is _____`)
+- Crescendo: gradual steering across turns
+- Many-shot jailbreaking with fabricated conversations
+- Policy puppetry:vspoofed "system" or "policy" authority
+- Logic-based jailbreaks: dual-response and hypothetical framing
+- MetaBreak: special-token / chat-template injection (`<|im_start|>`, `[INST]`, …)
   that forges system turns
 
 ## Repo layout
 
-- `PLANNING.md` — the full design and build plan (threat model, layers, phases).
-- `skills/` — the durable guides, one per layer. Code is downstream of these.
+- `PLANNING.md` — full design and build plan (threat model, layers, phases).
+- `skills/` — durable guides, one per layer. Code is downstream of these.
   - `input-firewall/` — cleaning and checking incoming messages, plus the
     attack taxonomy and concrete detector specs in `references/`.
   - `prompt-hardening/` — constructing the model call so untrusted input stays data.
   - `output-screening/` — inspecting responses and tracking risk across a conversation.
-- `src/promptpaws/` — the Python reference implementation.
-  - `firewall/` — the input firewall pipeline (Phase 1).
+- `src/promptpaws/` — Python implementation.
+  - `firewall/` — input firewall pipeline (Phase 1).
   - `hardening.py` — instruction hierarchy + spotlighting (Phase 2).
   - `screening.py` — leakage/dual-response output screening (Phase 2).
   - `session.py` — cumulative cross-turn risk + crescendo detection (Phase 3).
   - `monitoring.py` — decision logging (local JSONL default) + pattern alerts (Phase 4).
   - `redteam.py` — offline harness that throws the corpus at the stack (Phase 4).
-  - `verdict.py` — the structured verdict and shared signal scoring.
+  - `verdict.py` — structured verdict and shared signal scoring.
   - `mcp_server.py` — MCP server exposing the guardrails as tools.
 - `tests/` — unit tests.
 - `corpus/` — attack and benign test corpora (see `corpus/README.md`).
@@ -389,8 +388,10 @@ All five layers are implemented in Python behind provider-agnostic interfaces,
 driven by a test corpus and a red-team harness:
 
 - **Input firewall** — NFKC normalization, decode-and-rescan (base64/hex/URL/
-  rot13, depth-capped), word-break collapse, rule-based scanners, and structural
-  detectors, scored across every representation into a single verdict.
+  rot13, depth-capped), word-break collapse, rule-based scanners, structural
+  detectors, and statistical anomaly detectors (adversarial-suffix token salad,
+  mixed-script and ASCII-art obfuscation), scored across every representation
+  into a single verdict.
 - **Prompt hardening** — a provider-neutral (system, user) call with an
   instruction hierarchy, per-request spotlighting, and canary tripwires.
 - **Output screening** — canary and verbatim-span leakage detection plus
@@ -401,8 +402,9 @@ driven by a test corpus and a red-team harness:
   pattern alerts; the `promptpaws-redteam` harness reports catch and
   false-positive rates and gates CI.
 
-The corpus covers seven attack classes (including MetaBreak) at a 100% catch rate
-with a 0% benign block rate; the test suite is 118 tests.
+The corpus covers nine attack classes (including MetaBreak, adversarial suffixes,
+and ASCII-art/homoglyph obfuscation) at a 100% catch rate with a 0% benign block
+rate; the test suite is 141 tests.
 
 The stack is model-neutral by construction — no layer calls an LLM. Two optional
 escalation points, `SemanticJudge` (firewall) and `PolicyJudge` (screening), are

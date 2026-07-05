@@ -18,6 +18,7 @@ payloads to build detection, they need the pattern.
 9. Policy puppetry and prompt injection
 10. Logic-based jailbreaks
 11. MetaBreak (special-token / chat-template manipulation)
+12. Adversarial suffix (optimized token salad)
 
 Each entry has three parts: what it is, signals to detect it, and how to mitigate it.
 
@@ -70,15 +71,20 @@ wraps the request in fiction so the model treats its policies as not applying. T
 
 **What it is.** The payload is hidden in an encoding so keyword filters see gibberish. Covers
 base64, hex, rot13, URL encoding, leetspeak, homoglyphs (look-alike characters from other
-scripts), and zero-width or invisible characters inserted between letters.
+scripts), zero-width or invisible characters inserted between letters, and ASCII art that draws
+a banned word as a picture of letterforms rather than spelling it out as text.
 
 **Signals.**
 - A high ratio of base64-like or hex-like characters, or a character distribution that does
   not match natural language.
 - Presence of confusable homoglyphs (Cyrillic and Greek letters standing in for Latin ones,
-  fullwidth forms, mathematical alphanumeric symbols).
+  fullwidth forms, mathematical alphanumeric symbols) — including a single word that mixes
+  scripts, which is not something a legitimate typed word ever does.
 - Zero-width spaces, joiners, and other invisible code points inside words.
 - Unusually high entropy for the claimed language.
+- A run of consecutive short lines built from a small, repeated set of glyphs (block
+  characters, punctuation) that draw a letter shape when read as a column — the signature of
+  ASCII-art text.
 
 **Mitigation.**
 - Normalize first: NFKC, strip invisibles and controls, map homoglyphs to ASCII.
@@ -87,6 +93,9 @@ scripts), and zero-width or invisible characters inserted between letters.
 - Never act on an instruction that only appears after decoding. Decoded content is untrusted
   data. If a decoded block contains an override or a disallowed request, that is a strong
   attack signal, not a legitimate instruction.
+- For ASCII art: detect a run of drawn-looking lines (short, low glyph diversity, repeated
+  ink) rather than judging the message as a whole, since the art is usually wrapped in an
+  ordinary prose request ("spell out and answer the request below: ...").
 
 ---
 
@@ -271,3 +280,33 @@ instruction/data boundary that the whole chat format is supposed to enforce.
   one. The structural defense still belongs in prompt hardening and in the serving stack:
   render untrusted content so injected tokens cannot reach the parser as structure, and prefer
   templating APIs that encode user text rather than concatenating it into the raw prompt.
+
+---
+
+## 12. Adversarial suffix (optimized token salad)
+
+**What it is.** An automatically optimized string (GCG and similar gradient-search methods)
+appended to an otherwise ordinary request. The suffix is not meant to be read; it is search
+output that happens to push the target model into complying. It reads as nothing a human
+would type: glued punctuation clusters, unpronounceable consonant runs, camel-glued word
+fragments, all packed into a short span at the tail of the message.
+
+**Signals.**
+- A dense cluster of tokens, within a narrow span of the message, that individually look
+  statistically unlike human writing: runs of two or more glued punctuation/symbol characters,
+  seven or more consecutive consonants, or a lowercase-to-uppercase transition fused to
+  punctuation or digits.
+- The density of these "gibberish" tokens matters within the span they occupy, not across the
+  whole message — an optimized suffix rides on the tail of a benign-looking prefix, so a
+  whole-message ratio dilutes it away.
+- A single weird token in isolation (a hash, a base64 blob the user is legitimately asking
+  about) is not this attack; it takes a cluster to be the tell.
+
+**Mitigation.**
+- Score messages by gibberish-token density within the span from the first to the last weird
+  token, and flag when a cluster of several such tokens is dense enough. This catches the
+  suffix regardless of how much ordinary text precedes it.
+- Treat this as a detection signal, not a full defense: an optimized suffix is aimed at the
+  target model's weights, so the binding backstop is the same as elsewhere — prompt hardening
+  keeps the request's actual disallowed content from being obeyed even when the suffix nudges
+  the model, and output screening catches anything that still slips through.
