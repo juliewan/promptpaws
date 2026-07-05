@@ -434,28 +434,27 @@ consistent finding: **this firewall gates attack _structure_, not harmful
 _content_.** Bare harmful intent is the model's refusal job; promptpaws exists to
 strip the wrappers that talk a model out of refusing.
 
-- **JailbreakBench/JBB-Behaviors** and **declare-lab/HarmfulQA** — near-0% flagged,
-  which is **correct by design**: these are lists of bare harmful *questions* with
-  no attack scaffold. A structure firewall should pass them through to the model,
-  and the benign JBB split saw a 0% false-block rate.
-- **JailbreakV-28K** (mini split, 280 curated cases) — measured per attack
-  `format`, because the score is only meaningful in scope:
-  - **Text templates: 78%** caught (persona/override/injection structures — the
-    firewall's actual job). The remaining misses are ~8 named-persona families
-    (VIOLET, AlphaGPT/DeltaGPT, switch-flipper, …), tracked in
-    `corpus/known_gaps/jailbreakv_templates.json` for the semantic layer.
-  - **Image attacks** (`figstep`/`SD`/`typo`, ~30% of the set): 0%, and **out of
-    scope by construction** — the payload lives in a rendered image and the text is
-    just `"the image shows a phrase — list the steps"`. A text-only firewall can't
-    see it; that's an OCR/VLM pre-filter's job.
-  - **`redteam_query`** (the bare intent behind every case): 0% flagged — again the
-    model's job, not the firewall's.
+| Dataset | Slice | In scope? | Result | Why |
+|---|---|---|---|---|
+| JailbreakBench/JBB-Behaviors | benign split | yes (false-block check) | 0% blocked | no attack scaffold to trip on |
+| JailbreakV-28K (mini, 280 cases) | text templates | yes | **78% caught** | persona/override/injection structures — the firewall's actual job |
+| JailbreakV-28K (mini, 280 cases) | image attacks (`figstep`/`SD`/`typo`, ~30% of set) | no | 0% | payload lives in a rendered image; a text-only firewall can't see it — an OCR/VLM pre-filter's job |
+| JailbreakV-28K (mini, 280 cases) | blended overall | mixed | 46% | misleading: averages in-scope structure with out-of-scope image/content cases |
 
-  The blended "46% overall" number is misleading precisely because it averages
-  in-scope structure with out-of-scope image and content cases; the honest figure
-  is 78% of the text attacks this layer is built to catch. Testing it also earned
-  a real detector: the "not limited to … rules/policies" rule-negation cue, which
-  promoted the `Cooper` persona from a known gap to a catch (73% → 78%).
+Not shown: the harmful splits of JBB-Behaviors, all of HarmfulQA, and
+JailbreakV's `redteam_query` slice all score ~0% flagged — expected, since
+they're bare harmful *questions* with no attack scaffold, and refusing bare
+harmful intent is the model's job, not a structure firewall's.
+
+**JailbreakV-28K** text templates are the only in-scope row (persona/override/
+injection structures). The remaining misses there are ~8 named-persona families
+(VIOLET, AlphaGPT/DeltaGPT, switch-flipper, …), tracked in
+`corpus/known_gaps/jailbreakv_templates.json` for the semantic layer. The
+blended "46% overall" number is misleading precisely because it averages
+in-scope structure with out-of-scope image and content cases; the honest figure
+is 78% of the text attacks this layer is built to catch. Testing it also earned
+a real detector: the "not limited to … rules/policies" rule-negation cue, which
+promoted the `Cooper` persona from a known gap to a catch (73% → 78%).
 
 ## Refs
 - [declare-lab/HarmfulQA](https://huggingface.co/datasets/declare-lab/HarmfulQA)
