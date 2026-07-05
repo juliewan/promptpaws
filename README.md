@@ -3,11 +3,9 @@
 Layered, defense-in-depth guardrails that make an LLM chat interface much harder
 to jailbreak. 🐾
 
-<center>
-
-![Miyoko as maneki-neko](miyoko_promptpaws.png)
-
-</center>
+<p align="center">
+  <img src="miyoko_promptpaws.png" alt="Miyoko as maneki-neko" width="320">
+</p>
 
 ## Overview
 
