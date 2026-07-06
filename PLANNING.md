@@ -2,11 +2,15 @@
 
 Name: **promptpaws**
 
-> **Status (2026-07-05).** Phases 0–4 are shipped and green: 162 tests passing plus
-> 20 tracked known-gap xfails; red-team harness at 32/32 attacks caught across 9
-> classes with 0/24 benign blocked; ruff clean. Phase 5 (first real deployment) has
-> not started. See "Where things stand", "Next steps", and "Polish / refactor list"
-> at the bottom — the sections above them are the durable design and still hold.
+> **Status (2026-07-05).** Phases 0–4 are shipped and green: 194 tests passing plus
+> 12 tracked known-gap xfails; red-team harness at 41/41 attacks caught across 10
+> classes with 0/24 benign blocked; ruff clean. The semantic layer was prototyped
+> and the finding reshaped the plan — a static-embedding judge lost to cheap
+> structural rules on the templated gaps (now landed as `scan_templates`, +8 caught
+> and promoted), and the paraphrase residue is re-scoped to a host-side LLM judge.
+> See "Semantic layer: prototype finding", "Where things stand", "Next steps", and
+> "Polish / refactor list" at the bottom — the sections above them are the durable
+> design and still hold. Phase 5 (first real deployment) has not started.
 
 ## What this is
 
@@ -216,24 +220,91 @@ Shipped beyond the original plan:
 - **Known-gaps machinery** — `corpus/known_gaps/` runs as xfail so misses are recorded,
   never counted as passes; an XPASS is the promotion signal into `corpus/attacks/`.
 - **External dataset evaluation** — JBB-Behaviors benign split: 0% false blocks;
-  JailbreakV-28K text templates: 78% caught (the remaining ~8 named-persona families are
-  tracked known gaps). Testing earned one new production rule (rule-negation cue).
+  JailbreakV-28K text templates: 78% caught. Testing earned one new production rule
+  (rule-negation cue). The named-persona families that made up most of the miss (VIOLET,
+  NECO, AlphaGPT/DeltaGPT, switch-flipper, evil-confidant, fake-console) are now caught by
+  `scan_templates` and promoted into `attacks/`; the tracked residue is the paraphrased
+  roleplay set plus a leetspeak and a schema-simulation case.
 
 What exists only as a hook: `SemanticJudge` (firewall) and `PolicyJudge` (screening) are
 Protocols with no implementation behind them. Everything currently caught is caught by
 rules, structure, or statistics.
 
+## Semantic layer: prototype finding (2026-07-05)
+
+Prototyped the planned `SemanticJudge` as a local static-embedding backend
+(`model2vec`, `potion-retrieval-32M`) and measured it against the known-gap corpus.
+Two conclusions, both from measurement, not intuition:
+
+**Vercel-lightweight: yes.** `model2vec` installs with *no* PyTorch — just `tokenizers`
++ `numpy` (~30–128 MB depending on model), sub-millisecond encode, ~10 s one-time cold
+load. It fits a serverless function comfortably, unlike a `sentence-transformers`/torch
+stack (~250 MB+, over the AWS Lambda bundle limit Vercel runs under). So the
+deployment-feasibility question that kicked this off is settled in favor of static
+embeddings *if* embeddings were worth shipping.
+
+**Useful as the judge: no, not on this corpus.** Static embeddings key on surface
+lexical overlap, so benign text out-ranked real attacks: "what is a system prompt" (0.43)
+and "reset my password" (0.36) scored above most paraphrased jailbreaks (0.17–0.31). That
+is a *ranking* problem no threshold fixes. End-to-end through the pipeline at the best
+gate-clean operating point (benign-flag budget ≤ 5%), the judge lifted the gaps from 0 to
+**5/20** — and the 5 it caught were the near-literal ones; the marquee "reworded"
+paraphrases stayed missed. Pushing to 9–11/20 required an 8% benign-flag rate, which
+fails the red-team gate.
+
+**Decision.** Do not ship `model2vec` as the semantic judge — the numbers don't justify a
+dependency + model download for 5/20 with the flagship cases missed. The known gaps split
+cleanly, and each half gets the right tool:
+
+- *Templated* families (dual-response, dual-simulation, switch/opposite persona,
+  coined-persona rule-drop, authority spoof, fake console) are **structural, not
+  semantic** — they share a scaffold shape independent of the coined name. A dozen
+  precise regexes (`firewall/scan.py::scan_templates`) catch **8/20** at **0** benign FP,
+  no dependency, fully explainable — beating the embedding judge outright. Landed this
+  branch; the 8 cases were promoted from `known_gaps/` into `attacks/` (corpus 33 → 41).
+- *Genuinely paraphrased* residue (the 9 `roleplay_paraphrase.json` cases that say
+  "unbound by the usual guardrails" with no literal cue) is what actually needs a neural
+  judge — and that judge wants an LLM or a torch cross-encoder, which belongs on the
+  persistent host, **not** the stateless Vercel firewall. That is next-steps item 1.
+
 ## Next steps (priority order)
 
-1. **Semantic layer v1 — the highest-value item in the repo.** Implement the first
-   `SemanticJudge` backend: embedding similarity against the attack corpus + known-gap
-   templates, shipped as an optional extra (`pip install promptpaws[semantic]`) using a
-   small local embedding model so the core stays zero-dependency and provider-free. The
-   20 xfail cases are the ready-made acceptance test: success is xfails flipping to
-   XPASS and being promoted into `corpus/attacks/`. This is also the unlock for the
-   README's known limitation — crescendo detection needs a semantic layer to feed
-   per-turn risk for keyword-clean escalation. A first `PolicyJudge` backend can follow
-   the same pattern.
+1. **Semantic judge — LLM-as-judge on the persistent host.** The static-embedding
+   prototype (above) settled that the paraphrase residue needs a real neural judge, and
+   that such a judge does not belong in the stateless Vercel firewall (per-request cost
+   and latency, and it would break the "no network, deterministic" property the
+   serverless path advertises). Design sketch:
+
+   - **Placement.** Runs on the persistent host that already backs the MCP server and the
+     session store — not the serverless firewall. The firewall stays pure and fast and
+     forwards only the cases the cheap layers can't resolve.
+   - **Trigger, not every turn.** Escalate only for inputs the cheap layers leave
+     *ambiguous* — a firewall `flag` (risk in `[FLAG_THRESHOLD, BLOCK_THRESHOLD)`), or a
+     sub-flag score carrying any persona/fiction cue — so the LLM cost is paid on a small
+     slice of traffic. This is the "cheap wide, then narrow" funnel from the detector
+     strategy section, made real.
+   - **Interface.** Implements the existing `SemanticJudge` Protocol
+     (`(text, representation) -> list[Signal]`); the vendor call lives *behind* it, so the
+     core stays provider-agnostic. It returns a `roleplay`/`hypothetical` Signal weighted
+     by the judge's confidence, which then combines through the same noisy-or + synergy as
+     every other signal — no special-casing in `inspect`.
+   - **Prompt.** A small fixed rubric: "does this instruct the assistant to drop or
+     override its rules, adopt an unrestricted persona, or answer as if policies don't
+     apply?" → structured yes/no + confidence. The judge sees only the user text (never
+     the system prompt — nothing to leak), and its own output is parsed strictly so a
+     crafted input can't turn the judge into an injection vector.
+   - **Safety guardrails.** Cache by normalized-text hash; short timeout with an explicit
+     fail-safe (on timeout/error keep the cheap-layer verdict — never silently fail open
+     or closed); pick the smallest model that clears the residue.
+   - **Acceptance test.** The 9 remaining `roleplay_paraphrase.json` gaps flip to XPASS
+     with benign flags within the 5% budget; then promote them, same flywheel as
+     `scan_templates`. This is also the unlock for the README's crescendo limitation —
+     keyword-clean per-turn escalation needs a semantic read to feed session risk.
+   - **Async fallback.** If synchronous latency is unacceptable, run the judge *offline*
+     over the monitoring log (Layer 5) rather than inline: same Signal output, feeding the
+     corpus flywheel and next-turn session risk instead of blocking the current turn.
+
+   A first `PolicyJudge` (output screening) can follow the same host-side pattern.
 2. ~~**CI.**~~ **Done** — `.github/workflows/ci.yml` runs ruff + pytest +
    `promptpaws-redteam` on 3.10 and 3.12, so the red-team harness now genuinely gates
    as the README claims.
@@ -286,9 +357,10 @@ next-steps item 1, not a cleanup.
 Targets from the original plan, with current measurements:
 
 - **Catch rate** per attack class against the red-team corpus (target: near-total on the
-  automatable classes). *Now: 100% on the 32-case literal corpus across 9 classes; 78%
-  on JailbreakV-28K text templates; 20 known-gap paraphrase/persona cases tracked as
-  xfail rather than counted.*
+  automatable classes). *Now: 100% on the 41-case corpus across 10 classes; 12 known-gap
+  cases tracked as xfail rather than counted (down from 20 after `scan_templates` caught
+  and promoted 8 named-persona templates). The residue is 9 paraphrased roleplay cases,
+  1 leetspeak, and 1 schema-simulation.*
 - **False positive rate** on a corpus of benign-but-weird real messages. This is the one
   people forget. A filter that blocks legitimate users is a failure even at 100% catch
   rate. *Now: 0% blocks and 0% flags on 24 benign cases — but the corpus is too small to

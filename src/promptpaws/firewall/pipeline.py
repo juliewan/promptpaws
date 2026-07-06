@@ -18,7 +18,7 @@ from promptpaws.firewall.anomaly import detect_adversarial_noise, detect_obfusca
 from promptpaws.firewall.collapse import collapse_word_breaks
 from promptpaws.firewall.decode import decode_representations
 from promptpaws.firewall.normalize import normalize
-from promptpaws.firewall.scan import SemanticJudge, scan_rules, scan_semantic
+from promptpaws.firewall.scan import SemanticJudge, scan_rules, scan_semantic, scan_templates
 from promptpaws.firewall.structural import detect_structural
 from promptpaws.verdict import Decision, Signal, Verdict, combine_signals
 
@@ -75,6 +75,7 @@ def inspect(text: str, judge: SemanticJudge | None = None) -> Verdict:
 
     for name, value in representations:
         signals.extend(scan_rules(value, name))
+        signals.extend(scan_templates(value, name))
         signals.extend(scan_semantic(value, name, judge))
         signals.extend(detect_adversarial_noise(value, name))
         signals.extend(detect_obfuscation(value, name))
