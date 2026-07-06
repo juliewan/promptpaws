@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from promptpaws.redteam import format_report, run
+from promptpaws.redteam import MAX_BENIGN_FLAG_RATE, Report, format_report, run
 
 CORPUS = Path(__file__).resolve().parent.parent / "corpus"
 
@@ -26,3 +26,22 @@ def test_format_report_is_readable():
     text = format_report(run(CORPUS))
     assert "red-team report" in text
     assert "attacks:" in text
+
+
+def test_benign_flags_over_budget_fail_the_clean_gate():
+    # Blocks aren't the only false positive that should fail the gate: a benign
+    # message that flags degrades a real user's turn too.
+    over = int(MAX_BENIGN_FLAG_RATE * 100) + 1
+    report = Report(
+        attack_total=1,
+        attack_caught=1,
+        benign_total=100,
+        benign_flagged=[f"benign {i}" for i in range(over)],
+    )
+    assert report.flag_fp_rate > MAX_BENIGN_FLAG_RATE
+    assert not report.clean
+
+    within = Report(
+        attack_total=1, attack_caught=1, benign_total=100, benign_flagged=["one weird message"]
+    )
+    assert within.clean

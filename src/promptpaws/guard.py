@@ -16,10 +16,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from promptpaws.firewall import inspect
+from promptpaws.firewall.scan import SemanticJudge
 from promptpaws.hardening import ModelCall, harden
+from promptpaws.verdict import SAFE_REFUSAL as DEFAULT_REFUSAL
 from promptpaws.verdict import Decision, Verdict
-
-DEFAULT_REFUSAL = "I can't help with that."
 
 
 @dataclass
@@ -45,14 +45,19 @@ def guard(
     documents: Sequence[str] = (),
     policy: str | None = None,
     refusal: str = DEFAULT_REFUSAL,
+    judge: SemanticJudge | None = None,
 ) -> Guarded:
     """Run the input firewall, then (unless it blocked) build the hardened call.
 
     A firewall ``block`` short-circuits: no model call is built. A ``flag`` or
     ``pass`` proceeds to hardening, using the firewall's normalized text — never
     the raw input.
+
+    Pass an optional ``judge`` to enable the firewall's semantic layer; it is
+    forwarded straight to :func:`inspect`, so the paraphrase/novel-attack backend
+    works from this facade, not only from a bare ``inspect`` call.
     """
-    verdict = inspect(user_message)
+    verdict = inspect(user_message, judge)
     if verdict.decision is Decision.BLOCK:
         return Guarded(verdict=verdict, blocked=True, call=None, refusal=refusal)
     call = harden(purpose, verdict.normalized_text, documents=documents, policy=policy)

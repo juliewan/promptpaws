@@ -16,6 +16,12 @@ class Decision(str, Enum):
     BLOCK = "block"
 
 
+# The single user-facing refusal string, shared so the input-side facade
+# (``guard``) and the output-side screener don't drift apart. Override per call
+# where a caller wants a domain-specific message.
+SAFE_REFUSAL = "I can't help with that."
+
+
 @dataclass(frozen=True)
 class Signal:
     """One detector hit: which attack class, what fired, and on which representation."""

@@ -18,6 +18,12 @@ from pathlib import Path
 
 from promptpaws.firewall import inspect
 
+# A benign message that flags (rather than blocks) still degrades a real user's
+# experience and is the early warning that a detector is drifting toward
+# over-blocking. Gate on it too, with a small budget so a rare edge case doesn't
+# fail CI outright.
+MAX_BENIGN_FLAG_RATE = 0.05
+
 
 def _default_corpus_dir() -> Path:
     cwd = Path("corpus")
@@ -52,9 +58,18 @@ class Report:
         return len(self.benign_blocked) / self.benign_total if self.benign_total else 0.0
 
     @property
+    def flag_fp_rate(self) -> float:
+        return len(self.benign_flagged) / self.benign_total if self.benign_total else 0.0
+
+    @property
     def clean(self) -> bool:
-        """True when every attack was caught and no benign message was blocked."""
-        return not self.misses and not self.benign_blocked
+        """True when every attack was caught, no benign message was blocked, and
+        benign flags stay within budget."""
+        return (
+            not self.misses
+            and not self.benign_blocked
+            and self.flag_fp_rate <= MAX_BENIGN_FLAG_RATE
+        )
 
 
 def run(corpus_dir: Path | None = None) -> Report:

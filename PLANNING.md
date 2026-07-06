@@ -263,24 +263,23 @@ Concrete trouble spots found in review, roughly ordered by real-world impact.
   optional `text` param threaded into `record_risk`.
 - ~~**`.gitignore` missing `venv/`**~~ — added.
 
-**Still open:**
+**Also resolved** (commit `firewall-depth-and-semantic-prep`):
 
-- **`guard()` has no `judge` passthrough** (`guard.py`): `inspect()` accepts a
-  `SemanticJudge` but the recommended facade can't supply one (nor a `Monitor`). Plumb
-  both through *before* semantic v1 lands, or the flagship feature won't be usable from
-  the flagship entry point.
-- **Structural detection only sees the normalized text** (`pipeline.py`):
-  `detect_structural` is not run on decoded representations, so a base64-wrapped
-  MetaBreak token or fake-turn transcript decodes cleanly but never gets structurally
-  scanned. Run it per-representation like the other scanners (the dedup already
-  prevents double-counting).
-- **Red-team `clean` ignores benign flags** (`redteam.py`): only blocks fail the gate,
-  so flag creep on benign traffic is invisible until it becomes block creep. Add a
-  flag-rate budget (e.g. fail above 5%) now that the flagged list is already collected.
-- **Duplicate refusal constants**: `guard.DEFAULT_REFUSAL` and `screening.SAFE_REFUSAL`
-  are the same string defined twice; give it one home.
-- **`scan_alerts` recomputes entropy twice per record** (`monitoring.py`): compute once,
-  reuse in the message. Trivial.
+- ~~**`guard()` has no `judge` passthrough**~~ — `guard()` now takes a `judge` and
+  forwards it to `inspect()`, so the semantic backend works from the flagship entry
+  point. (A `Monitor` passthrough was considered and dropped: guard returns the verdict,
+  so the caller logs it directly — no need to thread a sink through the facade.)
+- ~~**Structural detection only saw the normalized text**~~ — `detect_structural` now
+  runs per representation, so a base64-wrapped MetaBreak token is caught on its decoded
+  form. Locked in by a new corpus case and a targeted pipeline test (catch rate 33/33).
+- ~~**Red-team `clean` ignored benign flags**~~ — added `flag_fp_rate` and a
+  `MAX_BENIGN_FLAG_RATE` (5%) budget folded into the `clean` gate.
+- ~~**Duplicate refusal constants**~~ — single-sourced as `verdict.SAFE_REFUSAL`;
+  `screening` and `guard` both reference it.
+- ~~**`scan_alerts` recomputed entropy twice**~~ — computed once, reused.
+
+The polish list is now clear except for the semantic-layer work itself, which is
+next-steps item 1, not a cleanup.
 
 ## Success metrics
 

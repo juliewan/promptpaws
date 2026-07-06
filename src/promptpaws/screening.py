@@ -20,10 +20,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from promptpaws.verdict import Decision, Signal, combine_signals
+from promptpaws.verdict import Decision, SAFE_REFUSAL, Signal, combine_signals
 
 BLOCK_THRESHOLD = 0.8
-SAFE_REFUSAL = "I can't help with that."
+
+__all__ = ["BLOCK_THRESHOLD", "SAFE_REFUSAL", "PolicyJudge", "ScreenResult", "screen_output"]
 
 _CANARY_WEIGHT = 1.0
 _VERBATIM_WEIGHT = 0.9

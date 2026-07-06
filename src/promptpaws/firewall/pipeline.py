@@ -78,9 +78,12 @@ def inspect(text: str, judge: SemanticJudge | None = None) -> Verdict:
         signals.extend(scan_semantic(value, name, judge))
         signals.extend(detect_adversarial_noise(value, name))
         signals.extend(detect_obfuscation(value, name))
-
-    # Structural shape is best judged on the normalized text.
-    signals.extend(detect_structural(normalized, "normalized"))
+        # Structural shape is scanned per representation like everything else: a
+        # special token or fake-turn transcript hidden inside a base64/hex blob
+        # only surfaces once it is decoded, so scanning the decoded text is what
+        # catches an encoded MetaBreak. Dedup already stops identical
+        # representations from being scanned twice.
+        signals.extend(detect_structural(value, name))
 
     risk, hard_block = combine_signals(signals, boost_decoded=True)
 

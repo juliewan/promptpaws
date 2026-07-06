@@ -194,14 +194,11 @@ def scan_alerts(
             alerts.append(
                 Alert("output_near_miss", "output screening blocked a response", r.session_id)
             )
-        if (
-            r.layer == "firewall"
-            and r.raw_input
-            and len(r.raw_input) >= min_length
-            and _entropy(r.raw_input) >= entropy_threshold
-        ):
-            alerts.append(
-                Alert("high_entropy_input", f"entropy {_entropy(r.raw_input):.2f}", r.session_id)
-            )
+        if r.layer == "firewall" and r.raw_input and len(r.raw_input) >= min_length:
+            entropy = _entropy(r.raw_input)
+            if entropy >= entropy_threshold:
+                alerts.append(
+                    Alert("high_entropy_input", f"entropy {entropy:.2f}", r.session_id)
+                )
 
     return alerts
