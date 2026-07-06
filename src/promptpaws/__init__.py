@@ -13,6 +13,7 @@ The red-team harness lives in ``promptpaws.redteam`` (CLI: promptpaws-redteam).
 
 from promptpaws.firewall import inspect
 from promptpaws.guard import Guarded, guard
+from promptpaws.judge import LLMJudge, LLMPolicyJudge
 from promptpaws.hardening import ModelCall, harden
 from promptpaws.monitoring import (
     DecisionRecord,
@@ -31,6 +32,8 @@ __all__ = [
     "DecisionRecord",
     "Guarded",
     "JsonlSink",
+    "LLMJudge",
+    "LLMPolicyJudge",
     "MemorySink",
     "ModelCall",
     "Monitor",

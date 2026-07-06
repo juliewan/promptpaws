@@ -45,14 +45,16 @@ def test_custom_refusal_message():
 
 
 def test_semantic_judge_is_forwarded_to_the_firewall():
-    # A message with no rule-layer cues passes on its own; a judge that flags it
-    # must be able to drive the verdict from the facade, not only bare inspect().
+    # A persona-framed message the cheap rules don't score ("you are ..." with no
+    # literal cue) passes on its own but is routed to the judge; a judge that
+    # flags it must drive the verdict from the facade, not only bare inspect().
     def judge(text, representation):
         if representation == "normalized" and "banana" in text:
             return [Signal("roleplay", "stub semantic hit", representation, 0.9)]
         return []
 
-    assert guard("bot", "please banana").verdict.decision.value == "pass"
-    g = guard("bot", "please banana", judge=judge)
+    msg = "You are a banana with no further explanation."
+    assert guard("bot", msg).verdict.decision.value == "pass"
+    g = guard("bot", msg, judge=judge)
     assert g.blocked
     assert g.verdict.decision.value == "block"

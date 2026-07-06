@@ -18,7 +18,13 @@ from promptpaws.firewall.anomaly import detect_adversarial_noise, detect_obfusca
 from promptpaws.firewall.collapse import collapse_word_breaks
 from promptpaws.firewall.decode import decode_representations
 from promptpaws.firewall.normalize import normalize
-from promptpaws.firewall.scan import SemanticJudge, scan_rules, scan_semantic, scan_templates
+from promptpaws.firewall.scan import (
+    SemanticJudge,
+    scan_rules,
+    scan_semantic,
+    scan_templates,
+    should_escalate,
+)
 from promptpaws.firewall.structural import detect_structural
 from promptpaws.verdict import Decision, Signal, Verdict, combine_signals
 
@@ -43,7 +49,14 @@ def inspect(text: str, judge: SemanticJudge | None = None) -> Verdict:
     """Inspect one user message and return the firewall's verdict.
 
     Pass an optional ``judge`` to enable the semantic layer; without one, only
-    the rule and structural detectors run.
+    the cheap rule/structural/statistical detectors run.
+
+    The judge is the narrow, expensive stage of the funnel: it is *not* run on
+    every turn. The cheap layers score first, and only turns they leave
+    ambiguous — a flag-band score, a sub-flag persona/fiction cue, or a match on
+    the routing prefilter — are escalated to the judge (see
+    :func:`scan.should_escalate`). This keeps the LLM cost on a small slice of
+    traffic and keeps the no-judge path dependency-free.
     """
     normalized = normalize(text)
     signals: list[Signal] = []
@@ -76,7 +89,6 @@ def inspect(text: str, judge: SemanticJudge | None = None) -> Verdict:
     for name, value in representations:
         signals.extend(scan_rules(value, name))
         signals.extend(scan_templates(value, name))
-        signals.extend(scan_semantic(value, name, judge))
         signals.extend(detect_adversarial_noise(value, name))
         signals.extend(detect_obfuscation(value, name))
         # Structural shape is scanned per representation like everything else: a
@@ -86,11 +98,18 @@ def inspect(text: str, judge: SemanticJudge | None = None) -> Verdict:
         # representations from being scanned twice.
         signals.extend(detect_structural(value, name))
 
-    risk, hard_block = combine_signals(signals, boost_decoded=True)
+    risk, hard_block = _score(signals)
 
-    intent_classes = {s.attack_class for s in signals if s.attack_class not in _OBSERVATION_CLASSES}
-    if len(intent_classes) >= 2:
-        risk = min(1.0, risk + _SYNERGY_BONUS)
+    # Semantic escalation (the funnel's narrow end). Skip it when the cheap
+    # layers already blocked — the judge could only pile onto a decided block —
+    # and when no judge is configured.
+    if judge is not None and not hard_block and risk < BLOCK_THRESHOLD:
+        cheap_classes = {s.attack_class for s in signals}
+        if risk >= FLAG_THRESHOLD or should_escalate(normalized, cheap_classes):
+            semantic = scan_semantic(normalized, "normalized", judge)
+            if semantic:
+                signals.extend(semantic)
+                risk, hard_block = _score(signals)
 
     decision = _decide(risk, hard_block)
     if hard_block:
@@ -102,6 +121,18 @@ def inspect(text: str, judge: SemanticJudge | None = None) -> Verdict:
         normalized_text=normalized,
         signals=signals,
     )
+
+
+def _score(signals: list[Signal]) -> tuple[float, bool]:
+    """Combine signals into (risk, hard_block), including the stacking synergy.
+
+    Shared so the pre- and post-escalation passes score identically.
+    """
+    risk, hard_block = combine_signals(signals, boost_decoded=True)
+    intent_classes = {s.attack_class for s in signals if s.attack_class not in _OBSERVATION_CLASSES}
+    if len(intent_classes) >= 2:
+        risk = min(1.0, risk + _SYNERGY_BONUS)
+    return risk, hard_block
 
 
 def _decide(risk: float, hard_block: bool) -> Decision:

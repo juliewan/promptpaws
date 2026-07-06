@@ -2,15 +2,21 @@
 
 Name: **promptpaws**
 
-> **Status (2026-07-05).** Phases 0–4 are shipped and green: 194 tests passing plus
+> **Status (2026-07-06).** Phases 0–4 are shipped and green: 212 tests passing plus
 > 12 tracked known-gap xfails; red-team harness at 41/41 attacks caught across 10
-> classes with 0/24 benign blocked; ruff clean. The semantic layer was prototyped
-> and the finding reshaped the plan — a static-embedding judge lost to cheap
-> structural rules on the templated gaps (now landed as `scan_templates`, +8 caught
-> and promoted), and the paraphrase residue is re-scoped to a host-side LLM judge.
-> See "Semantic layer: prototype finding", "Where things stand", "Next steps", and
-> "Polish / refactor list" at the bottom — the sections above them are the durable
-> design and still hold. Phase 5 (first real deployment) has not started.
+> classes with 0/24 benign blocked; ruff clean. The semantic layer is now
+> **implemented** (next-steps item 1): a provider-agnostic host-side LLM judge
+> (`promptpaws.judge.LLMJudge` / `LLMPolicyJudge`) plumbed into the firewall as the
+> narrow end of a cheap-wide/expensive-narrow funnel — a high-recall router
+> (`scan.should_escalate`) decides which turns are worth an LLM call, and the judge
+> only fires on that slice (4% of the benign corpus). With a competent judge wired
+> in, all 9 paraphrased-roleplay residue cases flip to flag/block while the benign
+> corpus stays clean; the no-judge default path is unchanged and dependency-free.
+> The earlier prototype finding still holds — a static-embedding judge lost to
+> cheap structural rules on the templated gaps (landed as `scan_templates`, +8
+> caught and promoted); only the genuinely paraphrased residue needed the LLM.
+> See "Semantic layer", "Where things stand", "Next steps", and "Polish / refactor
+> list" at the bottom. Phase 5 (first real deployment) has not started.
 
 ## What this is
 
@@ -226,9 +232,11 @@ Shipped beyond the original plan:
   `scan_templates` and promoted into `attacks/`; the tracked residue is the paraphrased
   roleplay set plus a leetspeak and a schema-simulation case.
 
-What exists only as a hook: `SemanticJudge` (firewall) and `PolicyJudge` (screening) are
-Protocols with no implementation behind them. Everything currently caught is caught by
-rules, structure, or statistics.
+Semantic layer (2026-07-06): `SemanticJudge` (firewall) and `PolicyJudge` (screening)
+now have a shipped implementation — `promptpaws.judge.LLMJudge` and `LLMPolicyJudge`,
+provider-agnostic (constructed with a `complete: str -> str` callable; no vendor SDK in
+the core). Everything the *default* pipeline catches is still caught by rules, structure,
+or statistics — the judge is opt-in and only runs when a caller supplies one.
 
 ## Semantic layer: prototype finding (2026-07-05)
 
@@ -269,42 +277,45 @@ cleanly, and each half gets the right tool:
 
 ## Next steps (priority order)
 
-1. **Semantic judge — LLM-as-judge on the persistent host.** The static-embedding
-   prototype (above) settled that the paraphrase residue needs a real neural judge, and
-   that such a judge does not belong in the stateless Vercel firewall (per-request cost
-   and latency, and it would break the "no network, deterministic" property the
-   serverless path advertises). Design sketch:
+1. ~~**Semantic judge — LLM-as-judge on the persistent host.**~~ **Done**
+   (`promptpaws/judge.py`, commit `semantic-judge`). The static-embedding prototype
+   settled that the paraphrase residue needs a real neural judge, off the stateless
+   firewall. As shipped:
 
-   - **Placement.** Runs on the persistent host that already backs the MCP server and the
-     session store — not the serverless firewall. The firewall stays pure and fast and
-     forwards only the cases the cheap layers can't resolve.
-   - **Trigger, not every turn.** Escalate only for inputs the cheap layers leave
-     *ambiguous* — a firewall `flag` (risk in `[FLAG_THRESHOLD, BLOCK_THRESHOLD)`), or a
-     sub-flag score carrying any persona/fiction cue — so the LLM cost is paid on a small
-     slice of traffic. This is the "cheap wide, then narrow" funnel from the detector
-     strategy section, made real.
-   - **Interface.** Implements the existing `SemanticJudge` Protocol
-     (`(text, representation) -> list[Signal]`); the vendor call lives *behind* it, so the
-     core stays provider-agnostic. It returns a `roleplay`/`hypothetical` Signal weighted
-     by the judge's confidence, which then combines through the same noisy-or + synergy as
-     every other signal — no special-casing in `inspect`.
-   - **Prompt.** A small fixed rubric: "does this instruct the assistant to drop or
-     override its rules, adopt an unrestricted persona, or answer as if policies don't
-     apply?" → structured yes/no + confidence. The judge sees only the user text (never
-     the system prompt — nothing to leak), and its own output is parsed strictly so a
-     crafted input can't turn the judge into an injection vector.
-   - **Safety guardrails.** Cache by normalized-text hash; short timeout with an explicit
-     fail-safe (on timeout/error keep the cheap-layer verdict — never silently fail open
-     or closed); pick the smallest model that clears the residue.
-   - **Acceptance test.** The 9 remaining `roleplay_paraphrase.json` gaps flip to XPASS
-     with benign flags within the 5% budget; then promote them, same flywheel as
-     `scan_templates`. This is also the unlock for the README's crescendo limitation —
-     keyword-clean per-turn escalation needs a semantic read to feed session risk.
-   - **Async fallback.** If synchronous latency is unacceptable, run the judge *offline*
-     over the monitoring log (Layer 5) rather than inline: same Signal output, feeding the
-     corpus flywheel and next-turn session risk instead of blocking the current turn.
+   - **Placement.** `LLMJudge`/`LLMPolicyJudge` are host-side, injected into `inspect`
+     and `screen_output`; the no-judge default path is unchanged and dependency-free.
+   - **Trigger, not every turn** — *the load-bearing design choice.* The cheap layers
+     score first; only turns they leave ambiguous escalate to the judge. Ambiguity is a
+     flag-band score **or** a match on a deliberately high-recall routing prefilter
+     (`scan.should_escalate` / `_ESCALATION_ROUTER`). The router was necessary because 7
+     of the 9 residue cases score **0** from every cheap rule — pure risk-band gating
+     would never reach them. The router keys on persona/role/fiction *framing* (high
+     recall, low precision); the judge is the precision stage. Measured escalation on the
+     benign corpus: **1/24 (4%)** — a real "small slice."
+   - **Interface.** Implements the existing `SemanticJudge` Protocol behind a
+     `complete: str -> str` callable, so the vendor SDK stays out of the core. Returns a
+     confidence-weighted `roleplay`/`hypothetical` Signal that combines through the same
+     noisy-or + synergy as everything else — no special-casing in `inspect` (which now
+     shares one `_score` helper across the pre- and post-escalation passes).
+   - **Prompt + parsing.** Fixed rubric, user text wrapped as untrusted data (never the
+     system prompt). The completion is parsed strictly for a verdict/confidence/class
+     triple and nothing else, so a crafted input can't turn the judge into an injection
+     vector; anything unparseable resolves to *safe, no signal*.
+   - **Safety guardrails.** SHA-256 cache by text (transient failures uncached); optional
+     thread-bounded timeout; on timeout/error the judge adds nothing, so the cheap-layer
+     verdict stands unchanged — fails neither open nor closed.
+   - **Acceptance.** With a competent judge wired in, all 9 `roleplay_paraphrase.json`
+     residue cases flip to flag/block and the benign corpus stays clean
+     (`tests/test_judge.py`). CI proves the wiring with a deterministic fake `complete`;
+     the real-LLM XPASS-and-promote is a manual/offline step (the `known_gaps` xfails
+     still use the no-judge default, correctly, since production ships no bundled model).
+   - **`PolicyJudge`** (output screening) shipped alongside on the same base
+     (`LLMPolicyJudge`), with the domain policy injected so the core stays policy-free.
 
-   A first `PolicyJudge` (output screening) can follow the same host-side pattern.
+   **Not yet done, follows from this:** feed the judge's per-turn semantic read into
+   `SessionTracker` so keyword-clean crescendo escalation is caught (the README's stated
+   limitation), and the offline/async variant (run the judge over the Layer-5 log instead
+   of inline) for latency-sensitive deployments. Both are small given the judge exists.
 2. ~~**CI.**~~ **Done** — `.github/workflows/ci.yml` runs ruff + pytest +
    `promptpaws-redteam` on 3.10 and 3.12, so the red-team harness now genuinely gates
    as the README claims.
@@ -349,8 +360,8 @@ Concrete trouble spots found in review, roughly ordered by real-world impact.
   `screening` and `guard` both reference it.
 - ~~**`scan_alerts` recomputed entropy twice**~~ — computed once, reused.
 
-The polish list is now clear except for the semantic-layer work itself, which is
-next-steps item 1, not a cleanup.
+The polish list is clear. The semantic-layer work it formerly pointed at (next-steps
+item 1) has since shipped; see `promptpaws/judge.py`.
 
 ## Success metrics
 
