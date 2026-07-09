@@ -1,0 +1,58 @@
+{
+  "name": "promptpaws",
+  "version": "0.1.0",
+  "description": "Jailbreak guardrails for chat (=ﾟヮﾟ)",
+  "license": "MIT",
+  "author": "Julie Wan <julieintheloop@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/juliewan/promptpaws.git",
+    "directory": "packages/typescript"
+  },
+  "homepage": "https://github.com/juliewan/promptpaws#readme",
+  "bugs": {
+    "url": "https://github.com/juliewan/promptpaws/issues"
+  },
+  "keywords": [
+    "prompt-injection",
+    "jailbreak",
+    "guardrails",
+    "llm-security",
+    "ai-safety",
+    "prompt-security"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "verify": "npm run typecheck && npm test && npm run build",
+    "prepublishOnly": "npm run verify"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}

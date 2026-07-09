@@ -1,14 +1,18 @@
 # Integration guide
 
-promptpaws is a Python library. The default pipeline needs no environment
-variables, writes no files, makes no network calls, and has no runtime
-dependencies. Logging and model-based judges are opt-in.
+promptpaws ships as a Python library and an npm package for Node.js and
+TypeScript backends. The default pipeline needs no environment variables,
+writes no files, makes no network calls, and has no runtime dependencies.
+Logging sinks, the semantic input judge, and the MCP server are opt-in and
+remain Python-only; the npm package covers the deterministic core (firewall,
+hardening, output screening, session tracking).
 
 ## Choose an integration
 
 | Your application | Use |
 |---|---|
 | Python backend | Import `guard()` and `screen_output()` |
+| Node.js or TypeScript backend | `npm install promptpaws`; import `guard()` and `screenOutput()` |
 | Backend in another language | Deploy a small Python guard endpoint and call it over HTTPS |
 | MCP-capable assistant or agent | Run `promptpaws-mcp` |
 | Shell or CI check | Run `promptpaws check "some text"` |
@@ -76,9 +80,48 @@ export PROMPTPAWS_REFUSAL="I can't help with that right now."
 
 An explicit function argument takes precedence over the environment variable.
 
+## Node.js or TypeScript backend
+
+Use the npm package directly; no Python service is required:
+
+```bash
+npm install promptpaws
+```
+
+```ts
+import { guard, screenOutput, SessionTracker } from "promptpaws";
+
+const tracker = new SessionTracker();
+
+async function handleTurn(sessionId: string, userMessage: string): Promise<string> {
+  const g = guard("a customer-support assistant for Acme Co.", userMessage, {
+    policy: "no legal advice",
+  });
+  if (g.blocked) return g.refusal;
+
+  const response = await callModel(g.call.messages());
+  const screened = screenOutput(response, { canaries: g.call.canaries });
+
+  const session = tracker.record(sessionId, {
+    firewall: g.verdict,
+    screening: screened,
+  });
+  if (session.action === "refuse" || session.action === "reset") {
+    return "Let's start fresh. I can't continue down this path.";
+  }
+
+  return screened.safeResponse;
+}
+```
+
+Same two details apply: send `g.call.messages()` to the model, and pass
+`g.call.canaries` to `screenOutput()`. API reference and package docs:
+`packages/typescript/README.md`.
+
 ## Backend in another language
 
-Run promptpaws in a small Python endpoint. The endpoint screens the input and
+For backends that are neither Python nor Node.js, run promptpaws in a small
+Python endpoint. The endpoint screens the input and
 returns either a refusal or the hardened messages your existing backend should
 send to its model:
 

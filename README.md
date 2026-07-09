@@ -1,23 +1,32 @@
 # promptpaws 🐾
 
-Jailbreak guardrails for chat (=ﾟヮﾟ)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5%2B-3178C6?logo=typescript&logoColor=white)](packages/typescript)
+[![npm version](https://img.shields.io/npm/v/promptpaws)](https://www.npmjs.com/package/promptpaws)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 
 <p align="center">
   <img src="miyoko_promptpaws.png" alt="Miyoko as maneki-neko" width="200">
 </p>
 
-promptpaws screens user input, preserves system prompt,
-monitors for leakage, and tracks risk across a conversation.
 
-Shipped as Python library, MCP server, and an attack taxonomy
-with detector specification.
+promptpaws screens user input, preserves system prompts,
+detects prompt leakage, and tracks risk across a conversation.
+
+Ships as Python and TypeScript libraries, an MCP server, and an
+attack taxonomy with detector specifications.
 
 In Balatro, lucky procs bank gold. Here, regression tests bank on
-_cha-ching_ attacks (ㅇㅅㅇ)
+*cha-ching* attacks (ㅇㅅㅇ)
 
-<sub>promptpaws does not claim to be robust against every
+<sub>promptpaws does not claim to stop every
 jailbreak.</sub> It neutralizes common attack structures and
 raises attacker effort.
+
+Feeling red-teamy?
+<a href="https://julieintheloop.com/chat.html">Jailbreak
+my web chat.</a>
 
 ## Quickstart
 
@@ -117,7 +126,7 @@ export PROMPTPAWS_REFUSAL="I can't help with that."
 ```
 
 Deployment shapes, guard-endpoint REST variant, logging sinks,
-LLM judge wiring, full env-var reference lives in
+LLM judge wiring, full env-var reference:
 [INTEGRATION.md](INTEGRATION.md).
 
 

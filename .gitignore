@@ -4,6 +4,7 @@
 # Editors and local assistant settings
 .idea/
 .vscode/
+.serena/
 .claude/settings.local.json
 
 # Python bytecode and caches
@@ -26,6 +27,7 @@ ENV/
 # Packaging and build output
 build/
 dist/
+node_modules/
 *.egg-info/
 .eggs/
 
@@ -45,3 +47,4 @@ htmlcov/
 *.tmp
 *.swp
 *~
+.serena
