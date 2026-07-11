@@ -37,6 +37,17 @@ export function defaultRefusal(): string {
   return process.env.PROMPTPAWS_REFUSAL || SAFE_REFUSAL;
 }
 
+export function roundRisk(value: number): number {
+  // Python uses round-half-to-even; Math.round uses half toward +infinity.
+  const scaled = value * 1000;
+  const lower = Math.floor(scaled);
+  const fraction = scaled - lower;
+  if (Math.abs(fraction - 0.5) < 1e-10) {
+    return (lower % 2 === 0 ? lower : lower + 1) / 1000;
+  }
+  return Math.round(scaled) / 1000;
+}
+
 export function combineSignals(
   signals: readonly Signal[],
   boostDecoded = false,

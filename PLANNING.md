@@ -1,6 +1,6 @@
 # PromptPaws planning
 
-Last reviewed: 2026-07-08
+Last reviewed: 2026-07-11
 
 ## Purpose
 
@@ -36,15 +36,34 @@ The Python implementation is complete for the original five-layer design:
 - Interfaces: Python API, CLI, MCP server, red-team runner, and runnable backend
   example.
 
-Verified locally:
+Verified locally (2026-07-10, includes uncommitted working tree):
 
-- 228 tests pass.
+- 233 tests pass.
 - 12 known gaps are tracked as expected failures.
 - 41/41 attack-corpus cases are caught.
 - 0/24 benign-corpus cases are blocked or flagged.
 
-TypeScript port (2026-07-08): TS0 through TS3 implemented in
-`packages/typescript/` (~1,500 lines, 104 tests). Live Python-parity test
+Working tree (2026-07-10, uncommitted): invisible-Unicode obfuscation detector
+added to both implementations. Zero-width characters count only when placed
+inside an ASCII token; bidi embedding/override/isolate controls count anywhere.
+Benign controls (emoji ZWJ sequences, Persian ZWNJ) must not flag and are
+tested. TypeScript port and its tests included; parity holds.
+
+Working tree (2026-07-11, uncommitted): TS judge protocol and logging sinks
+implemented, pulling items 1 and 2 of the post-publish order into the first
+release (the plan allowed a provider-neutral judge in 0.1.0). `llmJudge` and
+`llmPolicyJudge` take a sync-or-async `complete` callback and mirror Python's
+rubric, strict parsing, LRU cache, timeout, and fail-safe. New async surface
+(`inspectInputAsync`, `guardAsync`, `screenOutputAsync`) carries the
+escalation funnel; sync API unchanged, parity suite still green. Monitoring
+adds `Monitor` plus Null/Memory/Jsonl/Stdout sinks writing the Python
+snake_case JSONL record shape, and `sinkFromEnv()` honoring `PROMPTPAWS_LOG`.
+TS suite now 135 tests over ~1,450 source lines. INTEGRATION.md
+stale claims fixed the same day: npm coverage statement, deployment-notes
+bullet, env-var applicability, Node judge and logging examples.
+
+TypeScript port (2026-07-08, counts updated 2026-07-10): TS0 through TS3
+implemented in `packages/typescript/` (~1,500 lines, 108 tests). Live Python-parity test
 compares `inspectInput` against `inspect_input` across the full shared corpus;
 parity holds. TS4 pre-publish checks verified: `npm run verify` green,
 `npm pack` tarball contains only LICENSE, README, dist, and package.json, and
@@ -59,6 +78,26 @@ These numbers describe the repository corpus, not production efficacy. The
 benign sample is too small to support a strong false-positive claim, and the
 hardening layer has not yet been benchmarked against adaptive live-model
 attacks.
+
+## Next steps (2026-07-10, updated 2026-07-11)
+
+Sequenced by dependency, smallest shippable first.
+
+1. Commit working tree: invisible-Unicode detector in both implementations,
+   TS judge protocol, TS monitoring sinks, new async API surface, tests, doc
+   updates, README image tweaks.
+2. ~~Fix INTEGRATION.md before publish.~~ Done 2026-07-11: deployment-notes
+   bullet no longer claims the package is Python-only, npm coverage statement
+   updated, env-var applicability marked (npm reads `PROMPTPAWS_REFUSAL` and
+   `PROMPTPAWS_LOG`), Node judge and logging examples added.
+3. Finish TS4: commit `packages/` and `LICENSE`, `npm publish` 0.1.0, verify
+   install from the registry. INTEGRATION.md and both READMEs already document
+   `npm install promptpaws`, so docs describe an unpublished package until this
+   lands.
+4. Answer the P0 platform question: is the first deployed assistant backend
+   Python or Node? Judge and logging now exist in both packages, so this no
+   longer gates connects; it still decides the `SessionStore` design and where
+   the monitoring flywheel's logs land.
 
 ## Request flow
 
@@ -332,15 +371,42 @@ and import the documented API without repository-relative paths.
 ### Deferred from the first npm release
 
 - MCP server.
-- Supabase corpus and monitoring helpers.
+- Supabase sink and corpus helpers (local sinks shipped 2026-07-11).
 - OpenAI-specific environment adapter.
 - Framework-specific middleware.
 - Shared Redis/database session stores.
 - Streaming output screening.
 
 These should be added after the deterministic core reaches parity. The judge
-protocol may be included in the first release if it remains a provider-neutral
-async callback; bundled provider clients should remain separate.
+protocol was included in the first release as a provider-neutral async
+callback (2026-07-11); bundled provider clients remain separate.
+
+Proposed post-publish order (2026-07-10; items 1 and 2 landed 2026-07-11,
+inside the first release as the judge-protocol clause above permits):
+
+1. ~~**Judge protocol.**~~ Implemented 2026-07-11: `llmJudge`/`llmPolicyJudge`
+   factories over a sync-or-async `complete` callback, with the Python rubrics,
+   strict parsing, LRU cache, timeout, and fail-safe. Escalation funnel wired
+   through `inspectInputAsync`/`guardAsync`; output judge through
+   `screenOutputAsync`. Verified by ported judge unit tests plus the shared
+   known-gap and benign corpora under a deterministic fake judge.
+2. ~~**Sink interface.**~~ Implemented 2026-07-11: `MonitorSink.emit(record)`
+   with Null/Memory/Jsonl/Stdout sinks, `Monitor` facade, `sinkFromEnv()`.
+   Records serialize to the Python snake_case JSONL shape so one review
+   toolchain reads logs from either backend.
+3. **`SessionStore`.** Shared with the Python P1 item. Serverless Node is the
+   worst case for the in-memory tracker: every cold start or scaled-out
+   instance fragments conversation state. Deliberately not scaffolded as a
+   sync interface now: a shared store (Redis, database) is necessarily async,
+   which forces `record()` async and is an API-breaking design decision to
+   make once, together with the Python abstraction, not twice.
+
+Stays out of the TS package:
+
+- MCP server: MCP is transport-level; the Python server already serves any
+  client, including Node ones.
+- Supabase sink and provider adapters: keep the zero-dependency core. Document
+  custom `emit` and `complete` examples instead, as the Python docs do.
 
 ## Roadmap
 
@@ -445,6 +511,8 @@ Track these separately; one headline catch rate is not sufficient.
 ## Open questions
 
 - What exact policy should the first deployed assistant enforce?
+- Is the first deployed backend Python or Node? Judge and logging exist in
+  both; the answer now drives `SessionStore` design and log destination.
 - Will the assistant have tools or private data access?
 - Which shared session store fits the initial deployment?
 - What streaming trade-off is acceptable for the chat UX?

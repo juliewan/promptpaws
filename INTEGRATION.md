@@ -3,9 +3,10 @@
 promptpaws ships as a Python library and an npm package for Node.js and
 TypeScript backends. The default pipeline needs no environment variables,
 writes no files, makes no network calls, and has no runtime dependencies.
-Logging sinks, the semantic input judge, and the MCP server are opt-in and
-remain Python-only; the npm package covers the deterministic core (firewall,
-hardening, output screening, session tracking).
+Both packages cover the deterministic core (firewall, hardening, output
+screening, session tracking) plus opt-in logging sinks and provider-neutral
+model judges. The MCP server, the Supabase sink, and the built-in OpenAI
+adapter remain Python-only.
 
 ## Choose an integration
 
@@ -254,6 +255,21 @@ verdict = monitor.firewall(
 )
 ```
 
+Node.js equivalent (`sinkFromEnv()` honors `PROMPTPAWS_LOG`; `StdoutSink`
+suits serverless platforms where stdout feeds platform logs):
+
+```ts
+import { JsonlSink, Monitor, inspectInput } from "promptpaws";
+
+const monitor = new Monitor(new JsonlSink("logs/decisions.jsonl"));
+const verdict = monitor.firewall(inspectInput(userMessage), {
+  rawInput: userMessage,
+});
+```
+
+Both packages write the same JSONL record shape, so one set of `jq` queries
+and review tooling covers logs from either backend.
+
 For the MCP server:
 
 ```bash
@@ -372,6 +388,27 @@ def handle_input(message: str):
 For another provider, replace only `complete()`. It receives a prompt and must
 return the model's response as a string.
 
+Node.js equivalent: `llmJudge()` takes a `complete` that may be async, and the
+judged path uses the async API (`guardAsync`, `inspectInputAsync`). The
+deterministic sync API is unchanged.
+
+```ts
+import { guardAsync, llmJudge } from "promptpaws";
+
+const judge = llmJudge(async (prompt) => {
+  const response = await client.responses.create({
+    model: "gpt-5-nano",
+    input: prompt,
+    max_output_tokens: 50,
+  });
+  return response.output_text;
+});
+
+const g = await guardAsync("a customer-support assistant", userMessage, {
+  judge,
+});
+```
+
 ### Built-in OpenAI adapter
 
 The MCP server can create the semantic judge from environment variables:
@@ -412,6 +449,9 @@ screened = screen_output(
 )
 ```
 
+Node.js equivalent: build the judge with `llmPolicyJudge(complete, { policy })`
+and pass it to `screenOutputAsync(response, { canaries, policyJudge })`.
+
 For the MCP server, setting `PROMPTPAWS_POLICY` alongside the OpenAI key enables
 the output policy judge:
 
@@ -439,12 +479,14 @@ Use a shared cache if cross-instance deduplication matters.
   or a hosted sink.
 - Keep model, Supabase, and service credentials in server-side environment
   variables.
-- The package is Python. Non-Python backends use a REST endpoint or hosted MCP
-  server.
+- Python and Node.js backends import the library directly. Backends in other
+  languages use a REST endpoint or hosted MCP server.
 
 ## Environment variables
 
-All variables are optional.
+All variables are optional. The npm package reads `PROMPTPAWS_REFUSAL` and
+`PROMPTPAWS_LOG`; every other variable applies to the Python package or MCP
+server only.
 
 | Variable | Effect | Default |
 |---|---|---|

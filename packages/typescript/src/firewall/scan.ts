@@ -36,3 +36,31 @@ export function scanTemplates(text: string, representation: string): readonly Si
   }
   return signals;
 }
+
+// Semantic-layer routing: the wide, cheap mouth of the escalation funnel.
+// High-recall, deliberately low-precision — a match only decides whether to
+// spend a judge call; the judge is the precision stage that clears benign
+// persona requests.
+const ESCALATION_ROUTER = /\byou(?:'re| are| will be| play| become)\b|\b(?:imagine|picture|envision)\s+(?:yourself|you\b|a version|an ai|a world|that you)\b|\b(?:slip into|take on|adopt|assume|embody|step into)\s+(?:the\s+|a\s+|an\s+)?(?:role|mindset|persona|character|mode|identity)\b|\byour character\b|\bversion of (?:you|the model|yourself)\b|\bai twin\b|\bpretend\b|\brole-?play\b|\bact as\b|\bfrom now on\b|\bfor the rest of (?:this|our) (?:chat|conversation|session)\b/iu;
+
+const ESCALATION_CUES = new Set([
+  "roleplay",
+  "hypothetical",
+  "instruction_override",
+  "prefix_injection",
+]);
+
+export function shouldEscalate(text: string, signalClasses: ReadonlySet<string>): boolean {
+  for (const signalClass of signalClasses) {
+    if (ESCALATION_CUES.has(signalClass)) return true;
+  }
+  return ESCALATION_ROUTER.test(text);
+}
+
+// Pluggable, provider-agnostic backend for the semantic layer. Keeping it an
+// injected callback keeps the firewall model-agnostic: the core never imports
+// a vendor SDK. May return synchronously or via Promise.
+export type SemanticJudge = (
+  text: string,
+  representation: string,
+) => readonly Signal[] | Promise<readonly Signal[]>;

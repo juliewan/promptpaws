@@ -13,8 +13,10 @@ structural scanners miss:
 
 - **Obfuscation** (``detect_obfuscation``): homoglyph smuggling that survives the
   small normalization table (a single word mixing Latin with Cyrillic/Greek) and
-  ASCII-art letterforms that spell a banned word as a picture. Both are things a
-  normal user essentially never does.
+  ASCII-art letterforms that spell a banned word as a picture. It also records
+  invisible Unicode inserted inside ASCII words or bidi controls used to alter
+  display order. These are removed by normalization, but the removal itself is
+  useful evidence when it changes an instruction-like token.
 
 Deterministic and cheap: pure character statistics, no model call, so these run
 inside the firewall without breaking its same-input-same-verdict contract.
@@ -89,8 +91,24 @@ def detect_adversarial_noise(text: str, representation: str) -> list[Signal]:
 
 _MIXED_SCRIPT_WEIGHT = 0.5
 _ASCII_ART_WEIGHT = 0.45
+_INVISIBLE_WEIGHT = 0.45
 
 _LETTER_RUN = re.compile(r"[^\W\d_]{2,}")  # runs of >=2 unicode letters
+
+# Inspired by LLM Guard's InvisibleText scanner, narrowed for false-positive
+# control. Format characters are legitimate in emoji and several writing
+# systems, so zero-width separators only count when placed *inside an ASCII
+# token*. Bidi embedding/override/isolate controls are suspicious anywhere
+# because they can make displayed text differ from the order a model receives.
+_ZERO_WIDTH = frozenset(
+    chr(code)
+    for code in (
+        *range(0x200B, 0x2010),
+        *range(0x2060, 0x2066),
+        0xFEFF,
+    )
+)
+_BIDI_CONTROLS = frozenset(chr(code) for code in (*range(0x202A, 0x202F), *range(0x2066, 0x206A)))
 
 _ASCII_ART_MIN_LINES = 4  # consecutive drawn lines needed to call it a letterform
 _ASCII_ART_MAX_DISTINCT = 6  # a drawn line reuses a tiny alphabet of glyphs
@@ -115,6 +133,19 @@ def _has_mixed_script_word(text: str) -> bool:
     for match in _LETTER_RUN.finditer(text):
         scripts = {s for ch in match.group() if (s := _script(ch)) is not None}
         if len(scripts) >= 2:
+            return True
+    return False
+
+
+def _has_suspicious_invisible(text: str) -> bool:
+    """Detect display controls or zero-width characters splitting ASCII tokens."""
+    for index, char in enumerate(text):
+        if char in _BIDI_CONTROLS:
+            return True
+        if char not in _ZERO_WIDTH or index == 0 or index == len(text) - 1:
+            continue
+        before, after = text[index - 1], text[index + 1]
+        if before.isascii() and before.isalnum() and after.isascii() and after.isalnum():
             return True
     return False
 
@@ -146,8 +177,17 @@ def _looks_like_ascii_art(text: str) -> bool:
 
 
 def detect_obfuscation(text: str, representation: str) -> list[Signal]:
-    """Flag homoglyph-smuggled words and ASCII-art letterforms."""
+    """Flag invisible text, homoglyph-smuggled words, and ASCII-art letterforms."""
     signals: list[Signal] = []
+    if _has_suspicious_invisible(text):
+        signals.append(
+            Signal(
+                "obfuscation",
+                "invisible Unicode inside token or bidi control",
+                representation,
+                _INVISIBLE_WEIGHT,
+            )
+        )
     if _has_mixed_script_word(text):
         signals.append(
             Signal(

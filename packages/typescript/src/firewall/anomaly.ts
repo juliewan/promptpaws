@@ -4,6 +4,15 @@ const SYMBOL_CLUSTER = /[^\w\s]{2,}/u;
 const CONSONANTS = /[bcdfghjklmnpqrstvwxz]{7,}/iu;
 const CAMEL = /[a-z][A-Z]/u;
 const LETTER_RUN = /[\p{L}]{2,}/gu;
+const ZERO_WIDTH = new Set([
+  ...Array.from({ length: 5 }, (_, index) => String.fromCodePoint(0x200b + index)),
+  ...Array.from({ length: 6 }, (_, index) => String.fromCodePoint(0x2060 + index)),
+  "\ufeff",
+]);
+const BIDI_CONTROLS = new Set([
+  ...Array.from({ length: 5 }, (_, index) => String.fromCodePoint(0x202a + index)),
+  ...Array.from({ length: 4 }, (_, index) => String.fromCodePoint(0x2066 + index)),
+]);
 
 function gibberish(token: string): boolean {
   if (token.length < 3 || !/\p{L}/u.test(token)) return false;
@@ -23,6 +32,18 @@ function mixedScript(text: string): boolean {
   for (const match of text.matchAll(LETTER_RUN)) {
     const scripts = new Set([...match[0]].map(script).filter((value) => value !== undefined));
     if (scripts.size >= 2) return true;
+  }
+  return false;
+}
+
+function suspiciousInvisible(text: string): boolean {
+  const characters = [...text];
+  for (const [index, character] of characters.entries()) {
+    if (BIDI_CONTROLS.has(character)) return true;
+    if (!ZERO_WIDTH.has(character) || index === 0 || index === characters.length - 1) continue;
+    const before = characters[index - 1] ?? "";
+    const after = characters[index + 1] ?? "";
+    if (/^[A-Za-z0-9]$/u.test(before) && /^[A-Za-z0-9]$/u.test(after)) return true;
   }
   return false;
 }
@@ -56,6 +77,7 @@ export function detectAdversarialNoise(text: string, representation: string): re
 
 export function detectObfuscation(text: string, representation: string): readonly Signal[] {
   const signals: Signal[] = [];
+  if (suspiciousInvisible(text)) signals.push({ attackClass: "obfuscation", detail: "invisible Unicode inside token or bidi control", representation, weight: 0.45 });
   if (mixedScript(text)) signals.push({ attackClass: "obfuscation", detail: "mixed-script word (homoglyph smuggling)", representation, weight: 0.5 });
   if (asciiArt(text)) signals.push({ attackClass: "obfuscation", detail: "ascii-art letterform", representation, weight: 0.45 });
   return signals;

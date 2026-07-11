@@ -1,10 +1,11 @@
-import { combineSignals, makeVerdict } from "../verdict.js";
+import { combineSignals, makeVerdict, roundRisk } from "../verdict.js";
 import type { Decision, Signal, Verdict } from "../verdict.js";
 import { detectAdversarialNoise, detectObfuscation } from "./anomaly.js";
 import { collapseWordBreaks } from "./collapse.js";
 import { decodeRepresentations } from "./decode.js";
 import { normalize } from "./normalize.js";
-import { scanRules, scanTemplates } from "./scan.js";
+import { scanRules, scanTemplates, shouldEscalate } from "./scan.js";
+import type { SemanticJudge } from "./scan.js";
 import { detectStructural } from "./structural.js";
 
 const FLAG_THRESHOLD = 0.4;
@@ -28,18 +29,7 @@ function decide(risk: number, hardBlock: boolean): Decision {
   return "pass";
 }
 
-function roundRisk(value: number): number {
-  // Python uses round-half-to-even; Math.round uses half toward +infinity.
-  const scaled = value * 1000;
-  const lower = Math.floor(scaled);
-  const fraction = scaled - lower;
-  if (Math.abs(fraction - 0.5) < 1e-10) {
-    return (lower % 2 === 0 ? lower : lower + 1) / 1000;
-  }
-  return Math.round(scaled) / 1000;
-}
-
-export function inspectInput(text: string): Verdict {
+function collect(text: string): { normalized: string; signals: Signal[] } {
   const normalized = normalize(text);
   const signals: Signal[] = [];
   const representations: [string, string][] = [];
@@ -75,10 +65,48 @@ export function inspectInput(text: string): Verdict {
     signals.push(...detectStructural(value, name));
   }
 
-  let [risk, hardBlock] = score(signals);
+  return { normalized, signals };
+}
+
+function finalize(
+  normalized: string,
+  signals: readonly Signal[],
+  risk: number,
+  hardBlock: boolean,
+): Verdict {
   const decision = decide(risk, hardBlock);
   if (hardBlock) risk = Math.max(risk, BLOCK_THRESHOLD);
   return makeVerdict(decision, roundRisk(risk), normalized, signals);
+}
+
+export function inspectInput(text: string): Verdict {
+  const { normalized, signals } = collect(text);
+  const [risk, hardBlock] = score(signals);
+  return finalize(normalized, signals, risk, hardBlock);
+}
+
+export async function inspectInputAsync(
+  text: string,
+  judge?: SemanticJudge,
+): Promise<Verdict> {
+  const { normalized, signals } = collect(text);
+  let [risk, hardBlock] = score(signals);
+
+  // Semantic escalation (the funnel's narrow end). Skip it when the cheap
+  // layers already blocked — the judge could only pile onto a decided block —
+  // and when no judge is configured.
+  if (judge && !hardBlock && risk < BLOCK_THRESHOLD) {
+    const cheapClasses = new Set(signals.map((signal) => signal.attackClass));
+    if (risk >= FLAG_THRESHOLD || shouldEscalate(normalized, cheapClasses)) {
+      const semantic = await judge(normalized, "normalized");
+      if (semantic.length > 0) {
+        signals.push(...semantic);
+        [risk, hardBlock] = score(signals);
+      }
+    }
+  }
+
+  return finalize(normalized, signals, risk, hardBlock);
 }
 
 export const inspect = inspectInput;

@@ -7,7 +7,7 @@
 
 
 <p align="center">
-  <img src="miyoko_promptpaws.png" alt="Miyoko as maneki-neko" width="200">
+  <img src="miyoko_promptpaws.png" alt="Miyoko as maneki-neko" width="225">
 </p>
 
 

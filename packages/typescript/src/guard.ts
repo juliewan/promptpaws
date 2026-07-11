@@ -1,4 +1,5 @@
-import { inspectInput } from "./firewall/pipeline.js";
+import { inspectInput, inspectInputAsync } from "./firewall/pipeline.js";
+import type { SemanticJudge } from "./firewall/scan.js";
 import { harden } from "./hardening.js";
 import type { HardenOptions, ModelCall } from "./hardening.js";
 import { defaultRefusal } from "./verdict.js";
@@ -6,6 +7,10 @@ import type { Verdict } from "./verdict.js";
 
 export interface GuardOptions extends HardenOptions {
   readonly refusal?: string;
+}
+
+export interface GuardAsyncOptions extends GuardOptions {
+  readonly judge?: SemanticJudge;
 }
 
 export interface GuardedBlocked {
@@ -24,12 +29,7 @@ export interface GuardedAllowed {
 
 export type Guarded = GuardedBlocked | GuardedAllowed;
 
-export function guard(
-  purpose: string,
-  userMessage: string,
-  options: GuardOptions = {},
-): Guarded {
-  const verdict = inspectInput(userMessage);
+function finishGuard(verdict: Verdict, purpose: string, options: GuardOptions): Guarded {
   if (verdict.decision === "block") {
     return {
       verdict,
@@ -44,4 +44,21 @@ export function guard(
     ...(options.canaries === undefined ? {} : { canaries: options.canaries }),
   });
   return { verdict, blocked: false, call, refusal: null };
+}
+
+export function guard(
+  purpose: string,
+  userMessage: string,
+  options: GuardOptions = {},
+): Guarded {
+  return finishGuard(inspectInput(userMessage), purpose, options);
+}
+
+export async function guardAsync(
+  purpose: string,
+  userMessage: string,
+  options: GuardAsyncOptions = {},
+): Promise<Guarded> {
+  const verdict = await inspectInputAsync(userMessage, options.judge);
+  return finishGuard(verdict, purpose, options);
 }

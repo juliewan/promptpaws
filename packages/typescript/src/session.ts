@@ -1,4 +1,5 @@
 import type { ScreenResult } from "./screening.js";
+import { roundRisk } from "./verdict.js";
 import type { Signal, Verdict } from "./verdict.js";
 
 export type SessionAction = "allow" | "heighten" | "refuse" | "reset";
@@ -43,16 +44,6 @@ const RISING_WINDOW = 3;
 
 function combine(first: number, second: number): number {
   return 1 - (1 - first) * (1 - second);
-}
-
-function roundRisk(value: number): number {
-  const scaled = value * 1000;
-  const lower = Math.floor(scaled);
-  const fraction = scaled - lower;
-  if (Math.abs(fraction - 0.5) < 1e-10) {
-    return (lower % 2 === 0 ? lower : lower + 1) / 1000;
-  }
-  return Math.round(scaled) / 1000;
 }
 
 interface Match {
