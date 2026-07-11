@@ -69,10 +69,14 @@ parity holds. TS4 pre-publish checks verified: `npm run verify` green,
 `npm pack` tarball contains only LICENSE, README, dist, and package.json, and
 a packed-tarball install into a clean consumer project passes JS import and
 strict TS declaration checks. Package metadata (license, repository, author,
-keywords, `sideEffects: false`) complete. Remaining: commit `packages/` and
-`LICENSE`, then `npm publish` and verify install from the registry. Note:
-`prepublishOnly` runs the parity suite, so publishing requires a machine where
-`python3` can import promptpaws; this is intentional verification, not a bug.
+keywords, `sideEffects: false`) complete. `promptpaws@0.1.0` published to the
+registry 2026-07-09 (pre-judge, pre-monitoring surface). Registry forbids
+republishing a version, so the judge/monitoring release ships as `0.2.0`
+(semver minor: backward-compatible feature additions); package.json bumped
+2026-07-11. Remaining: commit working tree, `npm publish` 0.2.0, verify
+install from the registry. Note: `prepublishOnly` runs the parity suite, so
+publishing requires a machine where `python3` can import promptpaws; this is
+intentional verification, not a bug.
 
 These numbers describe the repository corpus, not production efficacy. The
 benign sample is too small to support a strong false-positive claim, and the
@@ -90,10 +94,10 @@ Sequenced by dependency, smallest shippable first.
    bullet no longer claims the package is Python-only, npm coverage statement
    updated, env-var applicability marked (npm reads `PROMPTPAWS_REFUSAL` and
    `PROMPTPAWS_LOG`), Node judge and logging examples added.
-3. Finish TS4: commit `packages/` and `LICENSE`, `npm publish` 0.1.0, verify
-   install from the registry. INTEGRATION.md and both READMEs already document
-   `npm install promptpaws`, so docs describe an unpublished package until this
-   lands.
+3. Finish TS4: `npm publish` 0.2.0 (0.1.0 went live 2026-07-09 without judge,
+   monitoring, or async API), verify install from the registry. Until this
+   lands, the registry package trails the docs, which already describe the
+   judge and logging surface.
 4. Answer the P0 platform question: is the first deployed assistant backend
    Python or Node? Judge and logging now exist in both packages, so this no
    longer gates connects; it still decides the `SessionStore` design and where
@@ -358,7 +362,9 @@ Gate: equivalent actions and scores for shared multi-turn fixtures.
 - Inspect the tarball with `npm pack --dry-run`.
 - Install the packed tarball into a temporary consumer project and test both
   JavaScript imports and TypeScript declarations.
-- Publish `0.1.0`, then verify installation from the public registry.
+- Publish, then verify installation from the public registry. `0.1.0` went
+  live 2026-07-09; the judge/monitoring release is `0.2.0` since the registry
+  forbids republishing a version.
 
 Gate: a clean project can run:
 
